@@ -76,8 +76,10 @@ if ($Profile -eq "full") {
     }
 }
 
+$BrowserChannel = $env:DMB_BROWSER_CHANNEL
+if ([string]::IsNullOrWhiteSpace($BrowserChannel)) { $BrowserChannel = "auto" }
 Write-Host "Desktop Action Gateway v1.1 starting on 127.0.0.1:$Port" -ForegroundColor Cyan
 Write-Host "Profile: $Profile | Approval policy: $env:DMB_APPROVAL_POLICY" -ForegroundColor Cyan
-Write-Host "Browser channel: $($env:DMB_BROWSER_CHANNEL ?? 'auto')" -ForegroundColor DarkGray
+Write-Host "Browser channel: $BrowserChannel" -ForegroundColor DarkGray
 Write-Host "Keep this window open. Use the STOP-file kill switch for emergency shutdown of mutations." -ForegroundColor Yellow
 & .\.venv\Scripts\python.exe -m desktop_mcp_bridge actions
