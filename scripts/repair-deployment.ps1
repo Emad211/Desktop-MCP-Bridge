@@ -17,6 +17,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$InvocationParameters = @{} + $PSBoundParameters
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 Set-Location $RepoRoot
 $StateDir = Join-Path $env:LOCALAPPDATA "DesktopMCPBridge"
@@ -49,7 +50,7 @@ function Invoke-SelfElevated {
         "AllowEphemeral",
         "IUnderstand"
     )) {
-        if ($PSBoundParameters.ContainsKey($SwitchName) -and $PSBoundParameters[$SwitchName]) {
+        if ($InvocationParameters.ContainsKey($SwitchName) -and $InvocationParameters[$SwitchName]) {
             $Arguments += "-$SwitchName"
         }
     }
