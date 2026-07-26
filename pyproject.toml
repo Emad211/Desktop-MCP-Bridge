@@ -1,0 +1,54 @@
+[build-system]
+requires = ["hatchling>=1.26"]
+build-backend = "hatchling.build"
+
+[project]
+name = "desktop-mcp-bridge"
+version = "0.1.0"
+description = "A secure Windows desktop, filesystem, and shell bridge for MCP clients"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Emad211" }]
+dependencies = [
+  "mcp>=1.12,<2",
+  "pydantic>=2.8,<3",
+  "pydantic-settings>=2.4,<3",
+  "platformdirs>=4.2,<5",
+  "mss>=9,<11",
+  "Pillow>=10.4,<12",
+  "pyautogui>=0.9.54,<1",
+  "pygetwindow>=0.0.9,<1; sys_platform == 'win32'",
+  "psutil>=6,<8",
+  "tomli-w>=1.0,<2",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3,<9",
+  "pytest-cov>=5,<7",
+  "ruff>=0.6,<1",
+  "mypy>=1.11,<2",
+]
+
+[project.scripts]
+desktop-mcp-bridge = "desktop_mcp_bridge.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/desktop_mcp_bridge"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM"]
+
+[tool.pytest.ini_options]
+addopts = "-q --disable-warnings --maxfail=1"
+testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_unused_ignores = true
