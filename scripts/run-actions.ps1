@@ -44,6 +44,21 @@ $env:DMB_APPROVAL_POLICY = $(if ($Autonomous) { "autonomous" } else { "guarded" 
 $env:PLAYWRIGHT_BROWSERS_PATH = (Join-Path $RepoRoot ".playwright-browsers")
 $env:DMB_TESSDATA_DIR = (Join-Path $env:LOCALAPPDATA "DesktopMCPBridge\tessdata")
 
+$BrowserStatePath = Join-Path $env:LOCALAPPDATA "DesktopMCPBridge\browser-runtime.json"
+if (Test-Path $BrowserStatePath) {
+    try {
+        $BrowserState = Get-Content $BrowserStatePath -Raw | ConvertFrom-Json
+        if ($BrowserState.channel) {
+            $env:DMB_BROWSER_CHANNEL = [string]$BrowserState.channel
+        }
+        if ($BrowserState.executable_path -and (Test-Path $BrowserState.executable_path)) {
+            $env:DMB_BROWSER_EXECUTABLE_PATH = [string]$BrowserState.executable_path
+        }
+    } catch {
+        Write-Warning "Unable to read browser runtime state: $($_.Exception.Message)"
+    }
+}
+
 $TesseractCandidates = @(
     "$env:ProgramFiles\Tesseract-OCR\tesseract.exe",
     "${env:ProgramFiles(x86)}\Tesseract-OCR\tesseract.exe",
@@ -61,7 +76,8 @@ if ($Profile -eq "full") {
     }
 }
 
-Write-Host "Desktop Action Gateway v1.0 starting on 127.0.0.1:$Port" -ForegroundColor Cyan
+Write-Host "Desktop Action Gateway v1.1 starting on 127.0.0.1:$Port" -ForegroundColor Cyan
 Write-Host "Profile: $Profile | Approval policy: $env:DMB_APPROVAL_POLICY" -ForegroundColor Cyan
+Write-Host "Browser channel: $($env:DMB_BROWSER_CHANNEL ?? 'auto')" -ForegroundColor DarkGray
 Write-Host "Keep this window open. Use the STOP-file kill switch for emergency shutdown of mutations." -ForegroundColor Yellow
 & .\.venv\Scripts\python.exe -m desktop_mcp_bridge actions
