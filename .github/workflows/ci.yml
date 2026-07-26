@@ -24,9 +24,25 @@ jobs:
       - run: python -m pip install --upgrade pip
       - run: python -m pip install -e ".[dev]"
       - run: python -m compileall -q src
-      - run: python -m ruff check .
+      - name: Ruff
+        id: ruff
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          python -m ruff check . --output-format=concise 2>&1 | Tee-Object -FilePath ruff-output.txt
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Upload Ruff output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ruff-${{ matrix.python-version }}
+          path: ruff-output.txt
+      - name: Fail if Ruff failed
+        if: steps.ruff.outcome == 'failure'
+        shell: pwsh
+        run: exit 1
       - run: python -m pytest --cov=desktop_mcp_bridge --cov-report=term-missing
-      - name: Validate Action OpenAPI generation
+      - name: Validate imports and Action OpenAPI generation
         shell: pwsh
         run: |
-          python -c "from desktop_mcp_bridge.action_api import app; s=app.openapi(); assert s['openapi'].startswith('3.'); assert '/v1/act' in s['paths']; print(s['openapi'])"
+          python -c "from desktop_mcp_bridge.server import mcp; from desktop_mcp_bridge.action_api import app; s=app.openapi(); assert s['openapi'].startswith('3.'); assert '/v1/act' in s['paths']; print(s['openapi'], mcp.name)"
