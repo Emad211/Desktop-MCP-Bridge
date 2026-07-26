@@ -1,4 +1,5 @@
 .venv/
+.playwright-browsers/
 __pycache__/
 *.py[cod]
 .pytest_cache/
@@ -12,5 +13,9 @@ build/
 .env
 config.local.toml
 *.log
+*.tmp
+artifacts/
+browser-profile/
+downloads/
 .DS_Store
 Thumbs.db

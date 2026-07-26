@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import ipaddress
 import os
 import re
 import shlex
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from .config import BridgeSettings
 
@@ -27,6 +29,29 @@ MUTATING_ACTIONS = {
     "clipboard_write",
     "window_control",
     "uia_invoke",
+    "browser_start",
+    "browser_navigate",
+    "browser_interact",
+    "browser_tabs",
+    "browser_upload",
+    "browser_download",
+    "browser_evaluate",
+    "browser_close",
+    "registry_set",
+    "registry_delete",
+    "service_control",
+    "package_manage",
+    "network_admin",
+    "scheduled_task_control",
+    "power_control",
+}
+
+HIGH_RISK_ACTIONS = {
+    "start_command_job",
+    "delete_path",
+    "run_command",
+    "stop_process",
+    "browser_evaluate",
     "registry_set",
     "registry_delete",
     "service_control",
@@ -90,6 +115,37 @@ def validate_command(command: str, settings: BridgeSettings) -> None:
         raise SecurityViolation("PowerShell is disabled")
 
 
+def validate_browser_url(url: str, settings: BridgeSettings) -> str:
+    """Validate navigation targets according to the active access profile."""
+    parsed = urlparse(url)
+    scheme = parsed.scheme.lower()
+    if settings.is_full_access:
+        if scheme not in {"http", "https", "file", "about", "data"}:
+            raise SecurityViolation(f"Unsupported browser URL scheme: {scheme or '<missing>'}")
+        return url
+    if scheme not in {"http", "https"}:
+        raise SecurityViolation("Constrained profiles permit only http/https browser navigation")
+    hostname = (parsed.hostname or "").lower().rstrip(".")
+    if not hostname:
+        raise SecurityViolation("Browser URL has no hostname")
+    if hostname in {"localhost", "localhost.localdomain"} or hostname.endswith(".localhost"):
+        raise SecurityViolation("Loopback browser navigation requires Full access")
+    try:
+        address = ipaddress.ip_address(hostname)
+    except ValueError:
+        return url
+    if (
+        address.is_private
+        or address.is_loopback
+        or address.is_link_local
+        or address.is_reserved
+        or address.is_multicast
+        or address.is_unspecified
+    ):
+        raise SecurityViolation("Private or special-address browser navigation requires Full access")
+    return url
+
+
 def require_capability(settings: BridgeSettings, capability: str) -> None:
     value = getattr(settings, capability, False)
     if not value:
@@ -113,11 +169,23 @@ def first_executable(command: str) -> str:
 
 def redact(value: Any) -> Any:
     """Redact common credential fields before audit logging."""
-    secret_markers = ("password", "passwd", "secret", "token", "api_key", "apikey", "authorization")
+    secret_markers = (
+        "password",
+        "passwd",
+        "secret",
+        "token",
+        "api_key",
+        "apikey",
+        "authorization",
+    )
     if isinstance(value, dict):
         result: dict[str, Any] = {}
         for key, item in value.items():
-            result[key] = "***REDACTED***" if any(marker in key.lower() for marker in secret_markers) else redact(item)
+            result[key] = (
+                "***REDACTED***"
+                if any(marker in key.lower() for marker in secret_markers)
+                else redact(item)
+            )
         return result
     if isinstance(value, list):
         return [redact(item) for item in value]

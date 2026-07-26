@@ -31,6 +31,11 @@ class BridgeSettings(BaseSettings):
     action_host: str = "127.0.0.1"
     action_port: int = Field(default=8766, ge=1024, le=65535)
     action_api_key: str = ""
+    action_rate_limit_per_minute: int = Field(default=120, ge=10, le=10_000)
+    action_max_payload_chars: int = Field(default=90_000, ge=10_000, le=500_000)
+    approval_policy: Literal["guarded", "autonomous"] = "guarded"
+    idempotency_ttl_seconds: int = Field(default=900, ge=60, le=86_400)
+    idempotency_path: Path = Field(default_factory=lambda: _state_path("idempotency.json"))
 
     access_profile: Literal["safe", "developer", "full"] = "safe"
     full_access_confirmation: str = ""
@@ -50,6 +55,8 @@ class BridgeSettings(BaseSettings):
     enable_clipboard: bool = False
     enable_window_control: bool = True
     enable_ui_automation: bool = True
+    enable_ocr: bool = True
+    enable_browser: bool = True
     enable_registry: bool = False
     enable_service_control: bool = False
     enable_package_management: bool = False
@@ -58,9 +65,18 @@ class BridgeSettings(BaseSettings):
     enable_power_control: bool = False
     allow_powershell: bool = True
 
+    tesseract_command: str = ""
+    tessdata_dir: Path | None = None
+    browser_headless: bool = False
+
     audit_log_path: Path = Field(default_factory=lambda: _state_path("audit.jsonl"))
     kill_switch_path: Path = Field(default_factory=lambda: _state_path("STOP"))
     job_state_path: Path = Field(default_factory=lambda: _state_path("jobs"))
+    artifact_path: Path = Field(default_factory=lambda: _state_path("artifacts"))
+    artifact_signing_key: str = ""
+    artifact_ttl_seconds: int = Field(default=300, ge=30, le=86_400)
+    browser_profile_path: Path = Field(default_factory=lambda: _state_path("browser-profile"))
+    browser_downloads_path: Path = Field(default_factory=lambda: _state_path("downloads"))
 
     allowed_executables: list[str] = Field(
         default_factory=lambda: [
@@ -112,7 +128,21 @@ class BridgeSettings(BaseSettings):
     def normalize_roots(cls, roots: list[Path]) -> list[Path]:
         return [root.expanduser().resolve() for root in roots]
 
-    @field_validator("audit_log_path", "kill_switch_path", "job_state_path", mode="after")
+    @field_validator("tessdata_dir", mode="after")
+    @classmethod
+    def normalize_optional_path(cls, path: Path | None) -> Path | None:
+        return None if path is None else path.expanduser().resolve()
+
+    @field_validator(
+        "audit_log_path",
+        "kill_switch_path",
+        "job_state_path",
+        "artifact_path",
+        "browser_profile_path",
+        "browser_downloads_path",
+        "idempotency_path",
+        mode="after",
+    )
     @classmethod
     def normalize_state_paths(cls, path: Path) -> Path:
         return path.expanduser().resolve()
