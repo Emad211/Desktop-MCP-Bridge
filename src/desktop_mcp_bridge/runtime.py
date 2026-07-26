@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import platform
 from collections.abc import Callable
 from typing import Any, TypeVar
@@ -108,8 +109,11 @@ class DesktopBridge(
 
     def status(self, *, source: str = "local") -> dict[str, Any]:
         settings = self.settings
+        process = psutil.Process(os.getpid())
         return {
             "version": __version__,
+            "process_id": process.pid,
+            "process_started_at": process.create_time(),
             "platform": platform.platform(),
             "python": platform.python_version(),
             "transport": settings.transport,
