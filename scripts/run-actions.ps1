@@ -41,30 +41,8 @@ $env:DMB_ACTION_HOST = "127.0.0.1"
 $env:DMB_ACTION_PORT = "$Port"
 $env:DMB_ACTION_API_KEY = $ApiKey
 $env:DMB_APPROVAL_POLICY = $(if ($Autonomous) { "autonomous" } else { "guarded" })
-$env:PLAYWRIGHT_BROWSERS_PATH = (Join-Path $RepoRoot ".playwright-browsers")
-$env:DMB_TESSDATA_DIR = (Join-Path $env:LOCALAPPDATA "DesktopMCPBridge\tessdata")
 
-$BrowserStatePath = Join-Path $env:LOCALAPPDATA "DesktopMCPBridge\browser-runtime.json"
-if (Test-Path $BrowserStatePath) {
-    try {
-        $BrowserState = Get-Content $BrowserStatePath -Raw | ConvertFrom-Json
-        if ($BrowserState.channel) {
-            $env:DMB_BROWSER_CHANNEL = [string]$BrowserState.channel
-        }
-        if ($BrowserState.executable_path -and (Test-Path $BrowserState.executable_path)) {
-            $env:DMB_BROWSER_EXECUTABLE_PATH = [string]$BrowserState.executable_path
-        }
-    } catch {
-        Write-Warning "Unable to read browser runtime state: $($_.Exception.Message)"
-    }
-}
-
-$TesseractCandidates = @(
-    "$env:ProgramFiles\Tesseract-OCR\tesseract.exe",
-    "${env:ProgramFiles(x86)}\Tesseract-OCR\tesseract.exe",
-    "$env:LOCALAPPDATA\Programs\Tesseract-OCR\tesseract.exe"
-) | Where-Object { $_ -and (Test-Path $_) }
-if ($TesseractCandidates) { $env:DMB_TESSERACT_COMMAND = $TesseractCandidates[0] }
+& (Join-Path $PSScriptRoot "set-runtime-environment.ps1") -RepoRoot $RepoRoot
 
 if ($Profile -eq "full") {
     $env:DMB_FULL_ACCESS_CONFIRMATION = "I UNDERSTAND THIS GRANTS FULL CONTROL"
