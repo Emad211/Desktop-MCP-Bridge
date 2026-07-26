@@ -49,7 +49,7 @@ try {
                 if ($Part -match '^(?<scheme>https?|socks|socks5)=(?<address>.+)$') {
                     $Scheme = $Matches.scheme
                     if ($Scheme -eq 'socks') { $Scheme = 'socks5' }
-                    Add-ProxyCandidate -Url "$Scheme://$($Matches.address)" -Source "wininet:$($Matches.scheme)"
+                    Add-ProxyCandidate -Url "${Scheme}://$($Matches.address)" -Source "wininet:$($Matches.scheme)"
                 }
             }
         } else {
@@ -68,7 +68,7 @@ if ($WinHttpOutput -match 'Proxy Server\(s\)\s*:\s*(?<proxy>[^\r\n]+)') {
         if ($Part -match '^(?<scheme>https?|socks|socks5)=(?<address>.+)$') {
             $Scheme = $Matches.scheme
             if ($Scheme -eq 'socks') { $Scheme = 'socks5' }
-            Add-ProxyCandidate -Url "$Scheme://$($Matches.address)" -Source "winhttp:$($Matches.scheme)"
+            Add-ProxyCandidate -Url "${Scheme}://$($Matches.address)" -Source "winhttp:$($Matches.scheme)"
         } else {
             Add-ProxyCandidate -Url $Part -Source "winhttp"
         }
@@ -83,7 +83,7 @@ foreach ($Port in $LoopbackPorts) {
     } catch {}
     if (-not $Listening) { continue }
     $Scheme = if ($Port -in @(10808, 1080, 1081, 7891)) { "socks5" } else { "http" }
-    Add-ProxyCandidate -Url "$Scheme://127.0.0.1:$Port" -Source "loopback-scan"
+    Add-ProxyCandidate -Url "${Scheme}://127.0.0.1:${Port}" -Source "loopback-scan"
 }
 
 function Invoke-CurlProbe {
