@@ -40,12 +40,34 @@ jobs:
           }
           if ($Failed) { exit 1 }
       - name: Validate Windows network detector
+        id: network_detector
         shell: pwsh
+        continue-on-error: true
         run: |
-          $Profile = .\scripts\get-network-profile.ps1 -TimeoutSeconds 2 | ConvertFrom-Json
-          if (-not $Profile.detected_at) { throw "Network detector returned no timestamp." }
-          if (-not $Profile.recommended_mode) { throw "Network detector returned no recommendation." }
-          $Profile | ConvertTo-Json -Depth 5
+          try {
+            $Raw = .\scripts\get-network-profile.ps1 -TimeoutSeconds 2 -PortProbeTimeoutMilliseconds 100
+            $Raw | Set-Content -Path network-detector-output.txt -Encoding UTF8
+            $Profile = $Raw | ConvertFrom-Json
+            if (-not $Profile.detected_at) { throw "Network detector returned no timestamp." }
+            if (-not $Profile.recommended_mode) { throw "Network detector returned no recommendation." }
+            $Profile | ConvertTo-Json -Depth 8
+          } catch {
+            $_ | Format-List * -Force | Out-String | Tee-Object -FilePath network-detector-error.txt
+            exit 1
+          }
+      - name: Upload network detector output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: network-detector-${{ matrix.python-version }}
+          path: |
+            network-detector-output.txt
+            network-detector-error.txt
+          if-no-files-found: ignore
+      - name: Fail if network detector failed
+        if: steps.network_detector.outcome == 'failure'
+        shell: pwsh
+        run: exit 1
       - name: Ruff
         id: ruff
         shell: pwsh
