@@ -125,8 +125,9 @@ foreach ($Candidate in $ProxyCandidates) {
     }
 }
 
-$WorkingProxies = @($ProxyCandidates | Where-Object { $_.probe -and $_.probe.success })
-$LikelyV2Ray = @($ProxyCandidates | Where-Object {
+$ProxyArray = @($ProxyCandidates | ForEach-Object { $_ })
+$WorkingProxies = @($ProxyArray | Where-Object { $_.probe -and $_.probe.success })
+$LikelyV2Ray = @($ProxyArray | Where-Object {
     $_.host -in @("127.0.0.1", "localhost", "::1") -and $_.listening
 }).Count -gt 0
 
@@ -135,7 +136,7 @@ $LikelyV2Ray = @($ProxyCandidates | Where-Object {
     direct_probe = $DirectProbe
     pac_url = $PacUrl
     winhttp = $WinHttpOutput.Trim()
-    proxy_candidates = @($ProxyCandidates)
+    proxy_candidates = $ProxyArray
     working_proxies = $WorkingProxies
     recommended_mode = $(if ($DirectProbe -and $DirectProbe.success) { "direct-first" } elseif ($WorkingProxies.Count -gt 0) { "proxy" } else { "offline-or-blocked" })
     detected_at = (Get-Date).ToUniversalTime().ToString("o")
