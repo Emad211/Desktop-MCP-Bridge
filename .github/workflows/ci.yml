@@ -40,13 +40,34 @@ jobs:
           }
           if ($Failed) { exit 1 }
       - name: Validate machine-readable diagnostics
+        id: diagnostics
         shell: pwsh
+        continue-on-error: true
         run: |
-          $Raw = .\scripts\diagnose.ps1 -Quick
-          $Diagnostics = $Raw | ConvertFrom-Json
-          if ($Diagnostics.imports_openapi -ne $true) { throw "Diagnostics import/OpenAPI check failed." }
-          if ($Diagnostics.imports_openapi_output -notmatch "imports/openapi: ok") { throw "Diagnostics captured no import output." }
-          $Diagnostics | ConvertTo-Json -Depth 8
+          try {
+            $Raw = .\scripts\diagnose.ps1 -Quick
+            $Raw | Set-Content -Path diagnostics-output.txt -Encoding UTF8
+            $Diagnostics = $Raw | ConvertFrom-Json
+            if ($Diagnostics.imports_openapi -ne $true) { throw "Diagnostics import/OpenAPI check failed." }
+            if ($Diagnostics.imports_openapi_output -notmatch "imports/openapi: ok") { throw "Diagnostics captured no import output." }
+            $Diagnostics | ConvertTo-Json -Depth 8
+          } catch {
+            $_ | Format-List * -Force | Out-String | Tee-Object -FilePath diagnostics-error.txt
+            exit 1
+          }
+      - name: Upload diagnostics output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: diagnostics-${{ matrix.python-version }}
+          path: |
+            diagnostics-output.txt
+            diagnostics-error.txt
+          if-no-files-found: ignore
+      - name: Fail if diagnostics failed
+        if: steps.diagnostics.outcome == 'failure'
+        shell: pwsh
+        run: exit 1
       - name: Validate Windows network detector
         id: network_detector
         shell: pwsh
