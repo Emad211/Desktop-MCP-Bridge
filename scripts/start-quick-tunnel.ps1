@@ -1,15 +1,36 @@
 param(
     [int]$Port = 8766,
     [switch]$InstallIfMissing,
-    [switch]$Restart
+    [switch]$Restart,
+    [int]$StartupTimeoutSeconds = 75
 )
 
 $ErrorActionPreference = "Stop"
 $StateDir = Join-Path $env:LOCALAPPDATA "DesktopMCPBridge"
 New-Item -ItemType Directory -Path $StateDir -Force | Out-Null
 $StatePath = Join-Path $StateDir "quick-tunnel.json"
+$UnifiedStatePath = Join-Path $StateDir "tunnel.json"
 $OutLog = Join-Path $StateDir "quick-tunnel.stdout.log"
 $ErrLog = Join-Path $StateDir "quick-tunnel.stderr.log"
+
+function Test-PublicHealth {
+    param([string]$Url, [int]$Attempts = 20)
+    for ($Index = 0; $Index -lt $Attempts; $Index++) {
+        try {
+            $Response = Invoke-RestMethod -Uri "$($Url.TrimEnd('/'))/health" -TimeoutSec 5
+            if ($Response.ok -eq $true) { return $true }
+        } catch {}
+        Start-Sleep -Seconds 1
+    }
+    return $false
+}
+
+try {
+    $LocalHealth = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/health" -TimeoutSec 3
+    if ($LocalHealth.ok -ne $true) { throw "Local gateway health returned ok=false." }
+} catch {
+    throw "The local Action Gateway is not healthy on 127.0.0.1:$Port. Start it before creating a tunnel."
+}
 
 if ($Restart) {
     & (Join-Path $PSScriptRoot "stop-quick-tunnel.ps1") -ErrorAction SilentlyContinue
@@ -17,7 +38,7 @@ if ($Restart) {
 if (Test-Path $StatePath) {
     try {
         $Existing = Get-Content $StatePath -Raw | ConvertFrom-Json
-        if (Get-Process -Id $Existing.pid -ErrorAction SilentlyContinue) {
+        if ((Get-Process -Id $Existing.pid -ErrorAction SilentlyContinue) -and (Test-PublicHealth $Existing.url 2)) {
             $Existing | ConvertTo-Json -Depth 5
             exit 0
         }
@@ -44,31 +65,49 @@ $Process = Start-Process -FilePath $Cloudflared `
     -RedirectStandardError $ErrLog `
     -PassThru
 
-$Deadline = (Get-Date).AddSeconds(60)
+$Deadline = (Get-Date).AddSeconds($StartupTimeoutSeconds)
 $Url = $null
 do {
     Start-Sleep -Milliseconds 500
     $Text = ""
     if (Test-Path $OutLog) { $Text += (Get-Content $OutLog -Raw -ErrorAction SilentlyContinue) }
     if (Test-Path $ErrLog) { $Text += "`n" + (Get-Content $ErrLog -Raw -ErrorAction SilentlyContinue) }
-    $Match = [regex]::Match($Text, 'https://[a-zA-Z0-9-]+\.trycloudflare\.com')
-    if ($Match.Success) { $Url = $Match.Value; break }
+    $Matches = [regex]::Matches($Text, 'https://(?<host>[a-zA-Z0-9][a-zA-Z0-9-]{5,})\.trycloudflare\.com')
+    foreach ($Match in $Matches) {
+        if ($Match.Groups['host'].Value -notin @('api', 'www')) {
+            $Url = $Match.Value
+            break
+        }
+    }
+    if ($Url) { break }
     if ($Process.HasExited) {
-        throw "cloudflared exited before producing a URL. Inspect $ErrLog"
+        $ErrorText = if (Test-Path $ErrLog) { Get-Content $ErrLog -Raw } else { "" }
+        throw "cloudflared exited before producing a tunnel URL. $ErrorText"
     }
 } while ((Get-Date) -lt $Deadline)
 
 if (-not $Url) {
     try { & taskkill.exe /PID $Process.Id /T /F | Out-Null } catch {}
-    throw "No Quick Tunnel URL was produced within 60 seconds. Inspect $ErrLog"
+    $ErrorText = if (Test-Path $ErrLog) { Get-Content $ErrLog -Raw } else { "" }
+    throw "No valid random trycloudflare.com URL was produced. api.trycloudflare.com is not a tunnel URL. $ErrorText"
 }
+if (-not (Test-PublicHealth $Url)) {
+    try { & taskkill.exe /PID $Process.Id /T /F | Out-Null } catch {}
+    $ErrorText = if (Test-Path $ErrLog) { Get-Content $ErrLog -Raw } else { "" }
+    throw "Cloudflare produced $Url but the public /health endpoint was unreachable. The network may block api.trycloudflare.com or Cloudflare Tunnel edge connectivity. $ErrorText"
+}
+
 $State = [ordered]@{
+    provider = "cloudflare-quick"
     pid = $Process.Id
     url = $Url
     local_url = "http://127.0.0.1:$Port"
+    healthy = $true
     started_at = (Get-Date).ToUniversalTime().ToString("o")
     stdout_log = $OutLog
     stderr_log = $ErrLog
 }
-$State | ConvertTo-Json | Set-Content -Path $StatePath -Encoding UTF8
-$State | ConvertTo-Json -Depth 5
+$Json = $State | ConvertTo-Json -Depth 5
+$Json | Set-Content -Path $StatePath -Encoding UTF8
+$Json | Set-Content -Path $UnifiedStatePath -Encoding UTF8
+$Json
