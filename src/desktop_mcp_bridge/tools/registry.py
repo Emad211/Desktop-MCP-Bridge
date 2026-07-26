@@ -32,10 +32,11 @@ class RegistryToolsMixin:
             type_map = {'string': winreg.REG_SZ, 'expand_string': winreg.REG_EXPAND_SZ, 'dword': winreg.REG_DWORD, 'qword': winreg.REG_QWORD, 'multi_string': winreg.REG_MULTI_SZ, 'binary': winreg.REG_BINARY}
             if value_type not in type_map:
                 raise ValueError(f'Unsupported registry type: {value_type}')
-            if value_type == 'binary' and isinstance(value, str):
-                value = base64.b64decode(value)
+            converted_value = value
+            if value_type == 'binary' and isinstance(converted_value, str):
+                converted_value = base64.b64decode(converted_value)
             with winreg.CreateKeyEx(root, key, 0, winreg.KEY_SET_VALUE) as handle:
-                winreg.SetValueEx(handle, value_name, 0, type_map[value_type], value)
+                winreg.SetValueEx(handle, value_name, 0, type_map[value_type], converted_value)
             return {'hive': hive, 'key': key, 'value_name': value_name, 'updated': True}
         return self._execute('registry_set', arguments, operation, source=source)
 
