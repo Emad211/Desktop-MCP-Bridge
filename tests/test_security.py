@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from desktop_mcp_bridge.config import BridgeSettings
+from desktop_mcp_bridge.config import BridgeSettings, FULL_ACCESS_CONFIRMATION
 from desktop_mcp_bridge.security import SecurityViolation, resolve_allowed_path, validate_command
 
 
@@ -39,3 +39,24 @@ def test_blocked_fragment_wins(tmp_path: Path) -> None:
     config.allowed_executables.append("shutdown")
     with pytest.raises(SecurityViolation):
         validate_command("shutdown /s", config)
+
+
+def test_full_mode_requires_exact_confirmation(tmp_path: Path) -> None:
+    with pytest.raises(ValueError):
+        BridgeSettings(access_profile="full", allowed_roots=[tmp_path])
+
+
+def test_full_mode_removes_path_and_command_restrictions(tmp_path: Path) -> None:
+    root = tmp_path / "root"
+    root.mkdir()
+    outside = tmp_path / "outside.txt"
+    outside.write_text("ok", encoding="utf-8")
+    config = BridgeSettings(
+        access_profile="full",
+        full_access_confirmation=FULL_ACCESS_CONFIRMATION,
+        allowed_roots=[root],
+    )
+    assert resolve_allowed_path(outside, config, must_exist=True) == outside.resolve()
+    validate_command("an-executable-not-in-the-allowlist --anything", config)
+    assert config.enable_recursive_delete is True
+    assert config.enable_registry is True

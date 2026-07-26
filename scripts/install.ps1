@@ -17,4 +17,6 @@ if (-not (Test-Path ".venv")) {
 & .\.venv\Scripts\python.exe -m pip install -e ".[dev]"
 
 Write-Host "Installation complete." -ForegroundColor Green
-Write-Host "Run .\scripts\run.ps1 -AllowedRoot 'C:\path\to\workspace'"
+Write-Host "Safe MCP: .\scripts\run.ps1 -AllowedRoot 'C:\path\to\workspace' -Profile safe"
+Write-Host "Full MCP: .\scripts\run-full-mcp.ps1 -IUnderstand"
+Write-Host "GPT Actions: .\scripts\run-actions.ps1 -ApiKey (.\scripts\new-action-key.ps1)"

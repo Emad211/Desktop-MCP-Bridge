@@ -1,0 +1,100 @@
+openapi: 3.1.0
+info:
+  title: Desktop Bridge GPT Action Gateway
+  version: 0.2.0
+  description: Authenticated control gateway for a private GPT and a user-owned Windows computer.
+servers:
+  - url: https://YOUR_PUBLIC_HTTPS_HOST
+    description: Replace with the authenticated HTTPS tunnel or reverse-proxy hostname.
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+  schemas:
+    DispatchRequest:
+      type: object
+      additionalProperties: false
+      required: [operation]
+      properties:
+        operation:
+          type: string
+          description: Exact operation name from the endpoint description.
+        arguments:
+          type: object
+          additionalProperties: true
+          default: {}
+    GatewayResponse:
+      type: object
+      additionalProperties: true
+      properties:
+        ok:
+          type: boolean
+        result:
+          description: Operation result when successful.
+        error:
+          type: string
+        message:
+          type: string
+security:
+  - bearerAuth: []
+paths:
+  /health:
+    get:
+      operationId: healthCheck
+      summary: Check gateway health
+      security: []
+      x-openai-isConsequential: false
+      responses:
+        "200":
+          description: Service status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GatewayResponse'
+  /v1/observe:
+    post:
+      operationId: observeComputer
+      summary: Read desktop or system state
+      description: >-
+        Read-only operations: status, system_info, list_directory, read_text_file,
+        read_binary_file, get_command_job, list_command_jobs, list_processes,
+        clipboard_read, list_windows, uia_tree, registry_get, audit_tail.
+      x-openai-isConsequential: false
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DispatchRequest'
+      responses:
+        "200":
+          description: Operation result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GatewayResponse'
+  /v1/act:
+    post:
+      operationId: controlComputer
+      summary: Change desktop or system state
+      description: >-
+        State-changing operations: desktop_step, write_text_file, write_binary_file,
+        copy_path, move_path, delete_path, run_command, start_command_job,
+        cancel_command_job, stop_process, clipboard_write, window_control,
+        uia_invoke, registry_set, registry_delete, service_control, package_manage,
+        network_admin, scheduled_task_control, power_control.
+      x-openai-isConsequential: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DispatchRequest'
+      responses:
+        "200":
+          description: Operation result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GatewayResponse'
