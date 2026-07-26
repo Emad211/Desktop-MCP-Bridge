@@ -1,5 +1,6 @@
 param(
     [int]$Port = 8766,
+    [string]$ProxyUrl = "",
     [switch]$InstallIfMissing,
     [switch]$Restart,
     [int]$StartupTimeoutSeconds = 75
@@ -57,13 +58,29 @@ if (-not (Get-Command cloudflared -ErrorAction SilentlyContinue)) {
     $env:Path = [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [Environment]::GetEnvironmentVariable("Path", "User")
 }
 $Cloudflared = (Get-Command cloudflared -ErrorAction Stop).Source
-Remove-Item $OutLog, $ErrLog -Force -ErrorAction SilentlyContinue
-$Process = Start-Process -FilePath $Cloudflared `
-    -ArgumentList @("tunnel", "--url", "http://127.0.0.1:$Port", "--no-autoupdate") `
-    -WindowStyle Minimized `
-    -RedirectStandardOutput $OutLog `
-    -RedirectStandardError $ErrLog `
-    -PassThru
+
+$PreviousProxyEnvironment = @{}
+foreach ($Name in @("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy")) {
+    $PreviousProxyEnvironment[$Name] = [Environment]::GetEnvironmentVariable($Name, "Process")
+    if ($ProxyUrl) {
+        [Environment]::SetEnvironmentVariable($Name, $ProxyUrl, "Process")
+    } else {
+        [Environment]::SetEnvironmentVariable($Name, $null, "Process")
+    }
+}
+try {
+    Remove-Item $OutLog, $ErrLog -Force -ErrorAction SilentlyContinue
+    $Process = Start-Process -FilePath $Cloudflared `
+        -ArgumentList @("tunnel", "--url", "http://127.0.0.1:$Port", "--no-autoupdate") `
+        -WindowStyle Minimized `
+        -RedirectStandardOutput $OutLog `
+        -RedirectStandardError $ErrLog `
+        -PassThru
+} finally {
+    foreach ($Name in $PreviousProxyEnvironment.Keys) {
+        [Environment]::SetEnvironmentVariable($Name, $PreviousProxyEnvironment[$Name], "Process")
+    }
+}
 
 $Deadline = (Get-Date).AddSeconds($StartupTimeoutSeconds)
 $Url = $null
@@ -102,6 +119,7 @@ $State = [ordered]@{
     pid = $Process.Id
     url = $Url
     local_url = "http://127.0.0.1:$Port"
+    proxy_url = $(if ($ProxyUrl) { $ProxyUrl } else { $null })
     healthy = $true
     started_at = (Get-Date).ToUniversalTime().ToString("o")
     stdout_log = $OutLog
