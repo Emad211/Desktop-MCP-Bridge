@@ -1,75 +1,81 @@
 # Desktop MCP Bridge
 
-Desktop MCP Bridge is a local-first Windows control plane that turns an MCP client or a private
-Custom GPT into a permissioned desktop operator. It combines native Windows UI automation, screen
-capture and OCR, a managed Playwright browser, filesystem and terminal tools, long-running jobs,
-process/system administration, short-lived screenshot artifacts, audit logging, and a local kill
-switch.
+Desktop MCP Bridge turns an MCP client or a private Custom GPT into a local-first Windows desktop
+operator. It provides screen vision, OCR, browser automation, native Windows UI Automation, files,
+terminal jobs, process control, and optional operating-system administration through an auditable
+localhost control plane.
 
-> This project is intentionally powerful. Keep the Python services bound to localhost, expose them
-> only through an authenticated HTTPS tunnel, keep the GPT private, and protect the bearer key like a
-> remote-administration credential.
+> This project intentionally grants powerful access to a user-owned Windows session. Keep the bridge
+> bound to localhost, expose it only through an HTTPS tunnel, keep the GPT private, and protect the
+> Bearer key like a remote-desktop credential.
 
-## v1.0 highlights
+## Version 1.1
 
-- Safe, Developer, and explicit Full access profiles
-- Private GPT Action Gateway with Bearer authentication
-- Idempotent write requests to prevent duplicate actions after retries
-- Guarded or Autonomous approval policy
-- Current desktop screenshots as MCP images, downloadable Action files, or signed temporary URLs
-- Local Tesseract OCR with confidence scores and bounding boxes
-- Persistent Playwright Chromium profile with ARIA/DOM snapshots and semantic locators
-- Browser tabs, navigation, upload, download, screenshots, console messages, and page errors
-- Windows UI Automation for native applications
-- Mouse, keyboard, clipboard, and window control
-- Text/binary filesystem operations and recursive deletion in Full mode
-- Synchronous commands and detached command jobs with polling/cancellation
-- Process-tree control
-- Registry, services, packages, network, scheduled tasks, and power controls
-- Append-only secret-redacted audit log
-- STOP-file kill switch independent of the model
-- DPAPI-encrypted Action key storage
-- Optional highest-privilege interactive autostart task
-- Quick Tunnel and named Cloudflare Tunnel helpers
-- Installation and diagnostics scripts
+Version 1.1 focuses on real Windows deployment and changing network conditions:
 
-## ChatGPT Pro connection path
+- self-elevating Bootstrap and repair through a visible UAC prompt;
+- preservation of the existing DPAPI-protected Action key;
+- Playwright Chromium → installed Edge → installed Chrome fallback;
+- automatic Tesseract discovery on every start;
+- V2Ray, WinINET, WinHTTP, environment proxy, PAC, and common local-port detection;
+- bounded direct and HTTP/SOCKS5 proxy probes;
+- ngrok, Tailscale Funnel, and Cloudflare Quick Tunnel providers;
+- adaptive Tunnel Supervisor for VPN on/off transitions;
+- stable-endpoint preference so the Custom GPT schema does not need repeated URL changes;
+- public `/health` verification before a tunnel is accepted;
+- Gateway and Tunnel Supervisor Scheduled Tasks with visible uninstall controls;
+- deployment diagnostics, status, repair report, and Persian upgrade instructions.
 
-ChatGPT Pro can build and use private GPTs with Actions, but Actions are not available in Pro model
-mode. Select an Action-compatible model in the custom GPT editor. The bridge does not call the OpenAI
-API, so it creates no OpenAI API token charges.
+The original v1.0 capabilities remain available:
 
-The practical path is:
+- Safe, Developer, and explicit Full access profiles;
+- Guarded and Autonomous approval policies;
+- Bearer-authenticated private GPT Action Gateway;
+- persistent idempotency for state-changing retries;
+- direct screenshots and signed short-lived image artifacts;
+- English/Persian OCR with confidence and bounding boxes;
+- managed Playwright browser with ARIA snapshots and semantic locators;
+- mouse, keyboard, clipboard, window, and Windows UI Automation control;
+- text/binary filesystem operations;
+- synchronous commands and detached jobs with polling/cancellation;
+- processes, Registry, services, packages, networking, scheduled tasks, and power control;
+- secret-redacted append-only audit log;
+- local STOP-file kill switch.
+
+## Architecture
 
 ```text
-Private Custom GPT
-        ↓ GPT Action over HTTPS + Bearer key
-Cloudflare tunnel / authenticated reverse proxy
-        ↓ localhost
-Desktop Action Gateway
-        ↓
-Windows + managed browser + filesystem + terminal
+Private Custom GPT / MCP client
+              |
+       HTTPS Action / MCP
+              |
+      authenticated tunnel
+              |
+     127.0.0.1 control plane
+              |
+     Windows desktop session
 ```
 
-The MCP server remains available for MCP clients that support the needed read/write tools.
+The bridge does not call the OpenAI API. A private GPT Action uses ChatGPT account usage rather than
+OpenAI API or Codex billing. The GPT must use a model that supports Actions; Pro model mode itself does
+not support GPT Actions.
 
 ## Requirements
 
 - Windows 10 or Windows 11
 - An interactive logged-in desktop session
-- Python 3.11 or newer; the installer can install Python with WinGet
-- Administrator PowerShell for OS-wide Full-mode operations and highest-privilege autostart
-- A private Custom GPT for the no-API-cost ChatGPT path
+- Python 3.11+
+- Administrator approval for OS-wide Full mode and highest-privilege autostart
+- A private Custom GPT for the ChatGPT path
 
-## One-command bootstrap
-
-Open **PowerShell as Administrator**:
+## New installation
 
 ```powershell
 git clone https://github.com/Emad211/Desktop-MCP-Bridge.git
 cd Desktop-MCP-Bridge
 git switch feat/initial-desktop-bridge
-Set-ExecutionPolicy -Scope Process Bypass
+Set-ExecutionPolicy -Scope Process Bypass -Force
+
 .\scripts\bootstrap.ps1 `
   -FullAccess `
   -Autonomous `
@@ -79,291 +85,277 @@ Set-ExecutionPolicy -Scope Process Bypass
   -IUnderstand
 ```
 
-This performs the following:
+The script requests UAC itself when required. It installs dependencies, preserves or creates the
+Action key, stores the key with Windows DPAPI, starts the Gateway, installs the visible Scheduled Task,
+and runs the end-to-end self-test.
 
-1. creates/updates `.venv`;
-2. installs the bridge and development checks;
-3. installs managed Chromium for Playwright;
-4. installs Tesseract OCR when missing;
-5. generates a strong Action key;
-6. stores the key encrypted for the current Windows user with DPAPI;
-7. writes the chosen profile and approval policy into local bootstrap metadata;
-8. optionally installs an interactive logon scheduled task.
+## Repair an existing installation
 
-The key is printed once and is also stored at:
+For an existing installation such as `C:\AI\Desktop-MCP-Bridge`:
+
+```powershell
+cd C:\AI\Desktop-MCP-Bridge
+git fetch origin
+git switch feat/initial-desktop-bridge
+git pull --ff-only origin feat/initial-desktop-bridge
+
+Set-ExecutionPolicy -Scope Process Bypass -Force
+.\scripts\repair-deployment.ps1 `
+  -FullAccess `
+  -Autonomous `
+  -InstallAutostart `
+  -InstallIfMissing `
+  -IUnderstand
+```
+
+The repair workflow:
+
+1. opens an elevated PowerShell through UAC;
+2. stops old Gateway and Tunnel processes;
+3. repairs dependencies;
+4. falls back to Edge/Chrome if the Playwright CDN is blocked;
+5. preserves the existing DPAPI key;
+6. installs Full/Autonomous Gateway autostart;
+7. runs diagnostics and self-test;
+8. writes `%LOCALAPPDATA%\DesktopMCPBridge\repair-report.json`.
+
+## Browser resilience
+
+The managed browser launch order is configurable and observable:
 
 ```text
-%LOCALAPPDATA%\DesktopMCPBridge\action-key.clixml
+configured executable
+→ selected channel
+→ Playwright Chromium
+→ Microsoft Edge
+→ Google Chrome
+→ detected system executable paths
 ```
 
-## Start the Action Gateway
+The actual backend and any failed candidates are returned by `browser_status` and included in bridge
+status. A failed download from `cdn.playwright.dev` is not fatal when Edge or Chrome is available.
 
-Full Autonomous mode:
+## V2Ray on/off resilience
+
+Run the detector:
 
 ```powershell
-.\scripts\run-actions.ps1 -FullAccess -Autonomous -IUnderstand
+.\scripts\get-network-profile.ps1
 ```
 
-Full Guarded mode:
+It checks:
+
+- direct HTTPS connectivity;
+- process/user/machine proxy environment variables;
+- Windows WinINET system proxy;
+- WinHTTP proxy;
+- PAC URL metadata;
+- common V2Ray HTTP/SOCKS ports;
+- a real HTTPS request through each listening proxy.
+
+No credential-bearing proxy URL is returned in diagnostics or state.
+
+### Recommended stable provider: ngrok
+
+A Custom GPT stores one fixed Action server URL. A free ngrok account provides an assigned development
+domain that remains stable, and the ngrok agent can connect either directly or through an HTTP/SOCKS5
+V2Ray proxy.
+
+Configure it once:
 
 ```powershell
-.\scripts\run-actions.ps1 -FullAccess -IUnderstand
+$env:NGROK_AUTHTOKEN = '<token>'
+
+.\scripts\setup-ngrok.ps1 `
+  -InstallIfMissing `
+  -StartTunnel `
+  -NetworkMode auto
+
+Remove-Item Env:NGROK_AUTHTOKEN
 ```
 
-The server listens only on:
+The token is stored by ngrok in its own user configuration. It is not written to the repository,
+Scheduled Tasks, generated GPT files, or bridge audit.
 
-```text
-http://127.0.0.1:8766
-```
-
-### Temporary HTTPS tunnel for testing
-
-Open a second PowerShell:
+Start adaptive monitoring:
 
 ```powershell
-.\scripts\run-quick-tunnel.ps1 -Port 8766 -InstallIfMissing
+.\scripts\start-tunnel-supervisor.ps1 `
+  -Provider ngrok `
+  -NetworkMode auto `
+  -InstallIfMissing `
+  -Restart
 ```
 
-Quick Tunnel URLs change whenever the tunnel restarts. For a stable hostname:
+Install its visible autostart task:
 
 ```powershell
-.\scripts\setup-named-tunnel.ps1 `
-  -TunnelName desktop-agent `
-  -Hostname desktop-agent.example.com `
+.\scripts\install-tunnel-autostart.ps1 `
+  -Provider ngrok `
+  -NetworkMode auto `
+  -InstallIfMissing `
+  -StartNow
+```
+
+When V2Ray is turned on or off, the Supervisor checks the public `/health` endpoint, redetects direct
+and proxy routes, and restarts the failed tunnel. With ngrok or Tailscale the public hostname remains
+stable.
+
+### Alternative: Tailscale Funnel
+
+```powershell
+.\scripts\start-tailscale-funnel.ps1 `
+  -InstallIfMissing `
+  -LoginIfNeeded
+```
+
+Tailscale gives a stable `.ts.net` hostname, but another VPN/TUN adapter can conflict with Tailscale.
+It is most compatible when V2Ray runs as a system proxy rather than TUN mode.
+
+### Temporary fallback: Cloudflare Quick Tunnel
+
+```powershell
+.\scripts\start-quick-tunnel.ps1 `
   -InstallIfMissing
 ```
 
+Quick Tunnel requires no account but its random URL changes after restart. It is accepted only after
+its public `/health` endpoint succeeds. `https://api.trycloudflare.com` is explicitly rejected because
+it is not a tunnel URL.
+
+## Unified automatic tunnel selection
+
+```powershell
+.\scripts\start-tunnel.ps1 `
+  -Provider auto `
+  -NetworkMode auto `
+  -InstallIfMissing
+```
+
+Automatic mode tries configured stable providers first, then the ephemeral Cloudflare fallback. It
+tries a direct route and every validated V2Ray/system proxy route.
+
 ## Configure the private GPT
 
-1. Create a private GPT.
-2. Choose a model that supports Actions.
-3. Copy `gpt/INSTRUCTIONS.md` into the GPT instructions.
-4. Add an Action and import `gpt-actions.openapi.yaml`.
-5. Replace `https://YOUR_PUBLIC_HTTPS_HOST` with the tunnel URL/hostname.
-6. Choose API Key authentication in Bearer format.
-7. Paste the generated key.
-8. Keep the GPT private.
-9. Test `healthCheck`, `observeComputer`, and `getScreenCapture`.
+After a healthy public endpoint is available:
+
+```powershell
+$Tunnel = Get-Content `
+  "$env:LOCALAPPDATA\DesktopMCPBridge\tunnel.json" `
+  -Raw | ConvertFrom-Json
+
+.\scripts\export-gpt-config.ps1 `
+  -PublicBaseUrl $Tunnel.url
+```
+
+Generated files:
+
+```text
+%LOCALAPPDATA%\DesktopMCPBridge\gpt-config\gpt-actions.openapi.yaml
+%LOCALAPPDATA%\DesktopMCPBridge\gpt-config\INSTRUCTIONS.md
+```
+
+In the GPT editor:
+
+1. keep Visibility on `Only me / Private`;
+2. select an Action-compatible model;
+3. paste/import the generated OpenAPI schema;
+4. choose `API Key` authentication in Bearer format;
+5. retrieve the DPAPI key only when needed:
+
+```powershell
+.\scripts\show-action-key.ps1 -IUnderstand
+```
+
+## Status and diagnostics
+
+```powershell
+.\scripts\status.ps1 -IncludeNetworkProfile
+.\scripts\diagnose.ps1 -TestScreen -TestNetwork
+.\scripts\self-test.ps1
+```
+
+Status includes:
+
+- local Gateway health;
+- Administrator, Full, and Autonomous state;
+- active browser backend;
+- OCR runtime;
+- Gateway and Tunnel Scheduled Tasks;
+- public endpoint health;
+- current Tunnel provider and route;
+- Tunnel Supervisor state;
+- endpoint-change warning;
+- V2Ray/direct/proxy detection.
+
+## Kill switch and shutdown
+
+Immediately block all mutations:
+
+```powershell
+.\scripts\kill-switch.ps1 -Mode Enable
+```
+
+Stop the adaptive tunnel stack:
+
+```powershell
+.\scripts\stop-tunnel-supervisor.ps1 -StopTunnel
+```
+
+Stop the Gateway:
+
+```powershell
+.\scripts\stop-gateway.ps1
+```
+
+Resume mutations:
+
+```powershell
+.\scripts\kill-switch.ps1 -Mode Disable
+```
 
 ## Access profiles
 
 | Capability | Safe | Developer | Full |
 |---|:---:|:---:|:---:|
-| Desktop screenshot/input | ✓ | ✓ | ✓ |
-| Windows UI Automation | ✓ | ✓ | ✓ |
-| OCR | ✓ | ✓ | ✓ |
-| Managed browser | ✓ | ✓ | ✓ |
-| Files under configured roots | ✓ | ✓ | ✓ |
+| Screenshots, OCR, browser, UI Automation | ✓ | ✓ | ✓ |
+| Files inside configured roots | ✓ | ✓ | ✓ |
 | Files anywhere allowed by Windows | — | — | ✓ |
 | Allowlisted shell | ✓ | ✓ | — |
 | Unrestricted shell | — | — | ✓ |
-| Delete files | — | ✓ | ✓ |
-| Recursive delete | — | — | ✓ |
-| Process termination | — | ✓ | ✓ |
-| Clipboard | — | ✓ | ✓ |
+| Delete/process control/clipboard | — | ✓ | ✓ |
 | Registry/services/packages/network/tasks/power | — | — | ✓ |
 
-Full mode requires both:
+Full access requires:
 
 ```text
 DMB_ACCESS_PROFILE=full
 DMB_FULL_ACCESS_CONFIRMATION=I UNDERSTAND THIS GRANTS FULL CONTROL
 ```
 
-It removes bridge-level path and command restrictions but does not bypass Windows ACLs, UAC, account
-separation, or endpoint protection.
-
-## Guarded versus Autonomous
-
-`DMB_APPROVAL_POLICY=guarded` requires an extra `CONFIRM:<operation>` value for high-risk Action calls.
-`autonomous` removes that extra bridge prompt while retaining ChatGPT's consequential Action UI,
-idempotency, audit logs, and the local kill switch.
-
-## Idempotent Action calls
-
-Every `/v1/act` request requires `request_id`.
-
-- Generate a new UUID for each logical action.
-- Reuse it only to retry the exact same request after a timeout.
-- The bridge returns the cached result instead of executing twice.
-- Reusing an ID with different arguments is rejected.
-
-This is especially important for file deletion, package installation, process termination, and command
-jobs.
-
-## Desktop vision
-
-### Direct screenshot
-
-`getScreenCapture` returns the current monitor as PNG.
-
-### Signed screenshot artifact
-
-`capture_desktop_artifact` stores a short-lived local image and returns a signed URL. The URL is
-unguessable, expires automatically, and does not expose a permanent unauthenticated file route.
-
-### OCR
-
-`screen_ocr` returns:
-
-- extracted text;
-- confidence per token;
-- x/y/width/height bounding boxes;
-- monitor/capture geometry;
-- optional screenshot artifact.
-
-Use OCR when native UI Automation does not expose the text. Use coordinate clicks only against a
-current capture, never an old screen.
-
-## Managed browser
-
-The browser has its own persistent profile under the per-user bridge state directory. It does not
-silently share the normal Chrome password manager or profile.
-
-Recommended loop:
-
-```text
-browser_start
-→ browser_navigate
-→ browser_snapshot
-→ browser_interact
-→ browser_snapshot or browser_screenshot
-```
-
-Selectors:
-
-```json
-{"kind":"role","role":"button","name":"Submit"}
-{"kind":"label","value":"Email"}
-{"kind":"text","value":"Download","exact":true}
-{"kind":"placeholder","value":"Search"}
-{"kind":"testid","value":"save-button"}
-{"kind":"css","value":"#save"}
-```
-
-Supported interactions include click, double-click, fill, sequential type, press, check, uncheck,
-select, hover, and focus. The snapshot includes an ARIA representation, visible interactive elements,
-console messages, and page errors.
-
-## Native Windows applications
-
-Prefer semantic automation:
-
-```text
-list_windows → uia_tree → uia_invoke → uia_tree
-```
-
-Use `desktop_step` only when an application does not expose useful UI Automation elements.
-
-## Long-running commands
-
-Do not run builds or installers synchronously through GPT Actions. Use:
-
-```text
-start_command_job → get_command_job → get_command_job ...
-```
-
-The job output is persisted under the per-user bridge state directory and can be cancelled, including
-its process tree.
-
-## Kill switch
-
-Block all mutating operations immediately:
-
-```powershell
-.\scripts\kill-switch.ps1 -Mode Enable
-```
-
-Inspect or re-enable:
-
-```powershell
-.\scripts\kill-switch.ps1 -Mode Status
-.\scripts\kill-switch.ps1 -Mode Disable
-```
-
-Read-only status and audit tools remain available for diagnosis.
-
-## Diagnostics
-
-```powershell
-.\scripts\diagnose.ps1 -TestScreen
-```
-
-Diagnostics check installation, imports, OpenAPI generation, Tesseract, Playwright browser files,
-encrypted key presence, port usage, administrator state, kill switch state, and optional live capture.
-
-
-## Operational lifecycle
-
-Start the gateway in the background and wait for health:
-
-```powershell
-.\scripts\start-gateway.ps1 -FullAccess -Autonomous -IUnderstand
-```
-
-Inspect all local state:
-
-```powershell
-.\scripts\status.ps1
-```
-
-Run an end-to-end test against the live gateway:
-
-```powershell
-.\scripts\self-test.ps1
-```
-
-Start/stop a machine-readable Quick Tunnel:
-
-```powershell
-$Tunnel = .\scripts\start-quick-tunnel.ps1 -InstallIfMissing | ConvertFrom-Json
-.\scripts\stop-quick-tunnel.ps1
-```
-
-Generate ready-to-import GPT files for that URL:
-
-```powershell
-.\scripts\export-gpt-config.ps1 -PublicBaseUrl $Tunnel.url
-```
-
-Stop the gateway process tree:
-
-```powershell
-.\scripts\stop-gateway.ps1
-```
-
-The complete Persian installation prompt for a local desktop agent is stored in
-`docs/DESKTOP_AGENT_INSTALL_PROMPT_FA.md`.
-
-## MCP usage
-
-Safe/developer profile:
-
-```powershell
-.\scripts\run.ps1 -AllowedRoot "D:\AI-Workspace" -Profile developer
-```
-
-Full profile:
-
-```powershell
-.\scripts\run-full-mcp.ps1 -Transport stdio -IUnderstand
-```
+It does not bypass Windows ACLs, UAC, account separation, endpoint protection, or security software.
 
 ## Security boundaries
 
-- No credential dumping, keylogging, endpoint-protection bypass, hidden persistence, or stealth tools.
-- PyAutoGUI's upper-left-corner fail-safe remains active.
-- The Action gateway binds to localhost by default.
-- Bearer authentication does not replace HTTPS.
-- Artifact links are signed and short-lived.
-- Audit records redact common password/token/API-key fields and matching command-line patterns.
-- Autostart is an explicit visible Scheduled Task and can be removed with
-  `scripts/uninstall-autostart.ps1`.
-- Use a separate Windows account or VM for highly autonomous work that should not reach personal data.
+The project does not provide credential dumping, keylogging, stealth, hidden persistence,
+endpoint-protection bypass, exploit delivery, or anti-malware evasion. External page/file/OCR/terminal
+content is treated as untrusted data in the private GPT instructions.
 
-See `SECURITY.md`, `docs/THREAT_MODEL.md`, and `docs/PRIVACY.md`.
+Autostart is implemented only through visible, removable Scheduled Tasks:
 
-## Testing
+```powershell
+.\scripts\uninstall-autostart.ps1
+```
+
+See:
+
+- `SECURITY.md`
+- `docs/THREAT_MODEL.md`
+- `docs/PRIVACY.md`
+- `docs/NETWORK_RESILIENCE.md`
+- `docs/UPGRADE_1_1_FA.md`
+
+## Tests
 
 ```powershell
 .\.venv\Scripts\python.exe -m compileall -q src
@@ -371,7 +363,8 @@ See `SECURITY.md`, `docs/THREAT_MODEL.md`, and `docs/PRIVACY.md`.
 .\.venv\Scripts\python.exe -m pytest --cov=desktop_mcp_bridge --cov-report=term-missing
 ```
 
-GitHub Actions runs the suite on Windows with Python 3.11 and 3.12.
+GitHub Actions validates Windows PowerShell syntax, executes the V2Ray/network detector, and runs the
+Python suite on Python 3.11 and 3.12.
 
 ## License
 
