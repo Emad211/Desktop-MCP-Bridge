@@ -85,7 +85,7 @@ if ($Existing -and -not $Restart) {
         gateway = $Existing
         state_path = $StatePath
     } | ConvertTo-Json -Depth 10
-    exit 0
+    return
 }
 
 if ($Restart -or $Existing) {
@@ -147,7 +147,7 @@ do {
             stdout_log = $OutLog
             stderr_log = $ErrLog
         } | ConvertTo-Json -Depth 12
-        exit 0
+        return
     }
     if ($Launcher.HasExited) {
         $ErrorText = if (Test-Path $ErrLog) { Get-Content $ErrLog -Raw } else { "" }
