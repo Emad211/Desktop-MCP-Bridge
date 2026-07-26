@@ -21,4 +21,4 @@ def test_generated_openapi_exposes_artifacts_and_screenshot() -> None:
     assert "/v1/screenshot" in schema["paths"]
     assert "/v1/observe" in schema["paths"]
     assert "/v1/act" in schema["paths"]
-    assert schema["info"]["version"] == "1.0.0"
+    assert schema["info"]["version"] == "1.1.0"
