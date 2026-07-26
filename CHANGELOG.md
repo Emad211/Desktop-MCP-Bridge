@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.2.0
+
+- Added a detached UAC elevation broker so desktop agents do not time out while waiting for consent.
+- Added machine-readable repair progress and repair status polling with stable run IDs.
+- Added transactional gateway shutdown with listener verification and exact remaining-PID errors.
+- Added single-instance gateway startup with authenticated profile, policy, privilege, and process-tree verification.
+- Added gateway PID and process start time to authenticated runtime status.
+- Separated caller privilege from actual gateway privilege in status output.
+- Changed gateway autostart to use verified single-instance startup instead of directly launching the server.
+- Made Full repair require a verified Administrator gateway before completion.
+- Added final listener/state/PID consistency checks to deployment repair.
+- Fixed diagnostic output contamination that produced `Invalid JSON primitive: imports.`.
+- Added robust terminal-JSON extraction for nested deployment scripts.
+- Added CI validation for machine-readable diagnostics and gateway process identity.
+
 ## 1.1.0
 
 - Added self-elevating bootstrap and deployment repair with UAC handoff.
