@@ -7,12 +7,19 @@ param(
 $ErrorActionPreference = "Continue"
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $Python = Join-Path $RepoRoot ".venv\Scripts\python.exe"
+if (-not (Test-Path $Python)) {
+    $PythonCommand = Get-Command python.exe -ErrorAction SilentlyContinue
+    if (-not $PythonCommand) { $PythonCommand = Get-Command python -ErrorAction SilentlyContinue }
+    if (-not $PythonCommand) { $PythonCommand = Get-Command py.exe -ErrorAction SilentlyContinue }
+    if ($PythonCommand) { $Python = $PythonCommand.Source }
+}
 $StateDir = Join-Path $env:LOCALAPPDATA "DesktopMCPBridge"
 $Results = [ordered]@{}
 $Results.repo_root = $RepoRoot
 $Results.windows = [Environment]::OSVersion.VersionString
 $Results.caller_administrator = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-$Results.python = if (Test-Path $Python) { (& $Python --version 2>&1 | Out-String).Trim() } else { "missing" }
+$Results.python_executable = if ($Python -and (Test-Path $Python)) { $Python } else { $null }
+$Results.python = if ($Results.python_executable) { (& $Python --version 2>&1 | Out-String).Trim() } else { "missing" }
 $Results.port_8766_in_use = [bool](Get-NetTCPConnection -LocalPort 8766 -ErrorAction SilentlyContinue)
 $Results.kill_switch_active = Test-Path (Join-Path $StateDir "STOP")
 $Results.encrypted_key_present = Test-Path (Join-Path $StateDir "action-key.clixml")
@@ -52,7 +59,7 @@ if (Test-Path $TunnelStatePath) {
     try { $Results.tunnel_state = Get-Content $TunnelStatePath -Raw | ConvertFrom-Json } catch {}
 }
 
-if (Test-Path $Python) {
+if ($Results.python_executable) {
     $ImportOutput = @(& $Python -c "from desktop_mcp_bridge.config import BridgeSettings; from desktop_mcp_bridge.action_api import app; from desktop_mcp_bridge.server import mcp; s=app.openapi(); assert '/v1/act' in s['paths']; print('imports/openapi: ok')" 2>&1)
     $Results.imports_openapi = $LASTEXITCODE -eq 0
     $Results.imports_openapi_output = ($ImportOutput | Out-String).Trim()
