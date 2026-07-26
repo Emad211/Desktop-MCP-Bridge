@@ -19,6 +19,7 @@ function Add-ProxyCandidate {
     $Uri = $null
     try { $Uri = [uri]$Normalized } catch { return }
     if (-not $Uri.Host -or -not $Uri.Port) { return }
+    if ($Uri.UserInfo) { return }
     $Listening = $false
     try {
         $Listening = Test-NetConnection -ComputerName $Uri.Host -Port $Uri.Port -InformationLevel Quiet -WarningAction SilentlyContinue
