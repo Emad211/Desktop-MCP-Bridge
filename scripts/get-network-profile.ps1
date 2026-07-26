@@ -1,11 +1,29 @@
 param(
     [string]$ProbeUrl = "https://api.ipify.org?format=json",
-    [int]$TimeoutSeconds = 8
+    [int]$TimeoutSeconds = 8,
+    [int]$PortProbeTimeoutMilliseconds = 300
 )
 
 $ErrorActionPreference = "SilentlyContinue"
 $ProxyCandidates = New-Object System.Collections.Generic.List[object]
 $Seen = @{}
+
+function Test-TcpPort {
+    param([string]$HostName, [int]$Port, [int]$TimeoutMilliseconds = 300)
+    $Client = New-Object System.Net.Sockets.TcpClient
+    try {
+        $Async = $Client.BeginConnect($HostName, $Port, $null, $null)
+        if (-not $Async.AsyncWaitHandle.WaitOne($TimeoutMilliseconds, $false)) {
+            return $false
+        }
+        $Client.EndConnect($Async)
+        return $Client.Connected
+    } catch {
+        return $false
+    } finally {
+        $Client.Close()
+    }
+}
 
 function Add-ProxyCandidate {
     param([string]$Url, [string]$Source)
@@ -20,10 +38,7 @@ function Add-ProxyCandidate {
     try { $Uri = [uri]$Normalized } catch { return }
     if (-not $Uri.Host -or -not $Uri.Port) { return }
     if ($Uri.UserInfo) { return }
-    $Listening = $false
-    try {
-        $Listening = Test-NetConnection -ComputerName $Uri.Host -Port $Uri.Port -InformationLevel Quiet -WarningAction SilentlyContinue
-    } catch {}
+    $Listening = Test-TcpPort -HostName $Uri.Host -Port $Uri.Port -TimeoutMilliseconds $PortProbeTimeoutMilliseconds
     $ProxyCandidates.Add([pscustomobject]@{
         url = $Normalized
         source = $Source
@@ -78,11 +93,9 @@ if ($WinHttpOutput -match 'Proxy Server\(s\)\s*:\s*(?<proxy>[^\r\n]+)') {
 
 $LoopbackPorts = @(10808, 10809, 1080, 1081, 2080, 2081, 7890, 7891, 7897, 8080, 8888)
 foreach ($Port in $LoopbackPorts) {
-    $Listening = $false
-    try {
-        $Listening = Test-NetConnection -ComputerName "127.0.0.1" -Port $Port -InformationLevel Quiet -WarningAction SilentlyContinue
-    } catch {}
-    if (-not $Listening) { continue }
+    if (-not (Test-TcpPort -HostName "127.0.0.1" -Port $Port -TimeoutMilliseconds $PortProbeTimeoutMilliseconds)) {
+        continue
+    }
     $Scheme = if ($Port -in @(10808, 1080, 1081, 7891)) { "socks5" } else { "http" }
     Add-ProxyCandidate -Url "${Scheme}://127.0.0.1:${Port}" -Source "loopback-scan"
 }
