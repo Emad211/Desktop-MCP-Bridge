@@ -1,105 +1,167 @@
 # Desktop MCP Bridge
 
-A local-first Windows control plane that turns an MCP client or a private Custom GPT into a
-permissioned desktop agent. It can observe and operate applications, work with files, run terminal
-commands, manage long-running jobs, inspect/control processes, automate Windows UI elements, and—in
-explicit Full mode—perform operating-system administration.
+Desktop MCP Bridge is a local-first Windows control plane that turns an MCP client or a private
+Custom GPT into a permissioned desktop operator. It combines native Windows UI automation, screen
+capture and OCR, a managed Playwright browser, filesystem and terminal tools, long-running jobs,
+process/system administration, short-lived screenshot artifacts, audit logging, and a local kill
+switch.
 
-> **This project is intentionally powerful.** Keep it bound to localhost, put authentication in
-> front of every remote path, use the local kill switch, and never expose the gateway directly to the
-> public internet.
+> This project is intentionally powerful. Keep the Python services bound to localhost, expose them
+> only through an authenticated HTTPS tunnel, keep the GPT private, and protect the bearer key like a
+> remote-administration credential.
 
-## What changed in v0.2
+## v1.0 highlights
 
-- Three access profiles: `safe`, `developer`, and explicit `full`
+- Safe, Developer, and explicit Full access profiles
 - Private GPT Action Gateway with Bearer authentication
-- Unrestricted shell and whole-account filesystem access in Full mode
-- Administrator-aware registry, service, package, network, task, and power modules
-- Windows UI Automation (`pywinauto`) in addition to mouse/keyboard control
-- Clipboard and window management
-- Binary file reads/writes plus copy, move, and recursive delete
-- Detached command jobs with status, logs, polling, and cancellation
-- Append-only, secret-redacted audit log
-- Local STOP-file kill switch for all mutating operations
-- OpenAPI schema and ready-to-paste private GPT instructions
+- Idempotent write requests to prevent duplicate actions after retries
+- Guarded or Autonomous approval policy
+- Current desktop screenshots as MCP images, downloadable Action files, or signed temporary URLs
+- Local Tesseract OCR with confidence scores and bounding boxes
+- Persistent Playwright Chromium profile with ARIA/DOM snapshots and semantic locators
+- Browser tabs, navigation, upload, download, screenshots, console messages, and page errors
+- Windows UI Automation for native applications
+- Mouse, keyboard, clipboard, and window control
+- Text/binary filesystem operations and recursive deletion in Full mode
+- Synchronous commands and detached command jobs with polling/cancellation
+- Process-tree control
+- Registry, services, packages, network, scheduled tasks, and power controls
+- Append-only secret-redacted audit log
+- STOP-file kill switch independent of the model
+- DPAPI-encrypted Action key storage
+- Optional highest-privilege interactive autostart task
+- Quick Tunnel and named Cloudflare Tunnel helpers
+- Installation and diagnostics scripts
 
-## ChatGPT Pro: the practical connection path
+## ChatGPT Pro connection path
 
-There are two transports:
+ChatGPT Pro can build and use private GPTs with Actions, but Actions are not available in Pro model
+mode. Select an Action-compatible model in the custom GPT editor. The bridge does not call the OpenAI
+API, so it creates no OpenAI API token charges.
 
-1. **MCP server** — best for MCP clients that permit write tools.
-2. **GPT Action Gateway** — the practical route for a private Custom GPT on a ChatGPT Pro account.
+The practical path is:
 
-At the time of this release, ChatGPT Pro custom MCP connections are limited to read/fetch tools; full
-MCP write actions are available on eligible workspace plans. A private GPT Action can still invoke the
-write gateway using an action-capable model. The bridge itself does not call the OpenAI API and does
-not create API-token charges.
+```text
+Private Custom GPT
+        ↓ GPT Action over HTTPS + Bearer key
+Cloudflare tunnel / authenticated reverse proxy
+        ↓ localhost
+Desktop Action Gateway
+        ↓
+Windows + managed browser + filesystem + terminal
+```
 
-The Action route is text/JSON oriented and subject to the GPT Actions execution deadline. Commands
-that may run for more than roughly 30 seconds should use `start_command_job`, followed by polling with
-`get_command_job`.
-
-## Capability matrix
-
-| Capability | Safe | Developer | Full |
-|---|:---:|:---:|:---:|
-| Screenshots and mouse/keyboard | ✓ | ✓ | ✓ |
-| Window listing/control | ✓ | ✓ | ✓ |
-| Windows UI Automation tree/invoke | ✓ | ✓ | ✓ |
-| Files under configured roots | ✓ | ✓ | ✓ |
-| Files anywhere accessible to the Windows account | — | — | ✓ |
-| Allowlisted shell commands | ✓ | ✓ | — |
-| Unrestricted shell command line | — | — | ✓ |
-| File deletion | — | ✓ | ✓ |
-| Recursive deletion | — | — | ✓ |
-| Process termination | — | ✓ | ✓ |
-| Clipboard | — | ✓ | ✓ |
-| Registry/services/packages/network/tasks/power | — | — | ✓ |
-| Administrator-only OS changes | — | — | ✓, when locally elevated |
-
-Full mode does not bypass Windows permissions. Run the bridge from an Administrator PowerShell when
-the requested operation itself requires elevation.
+The MCP server remains available for MCP clients that support the needed read/write tools.
 
 ## Requirements
 
 - Windows 10 or Windows 11
-- Python 3.11 or newer
-- An interactive logged-in desktop session for visual/UI control
-- For GPT Actions: a private Custom GPT and an HTTPS tunnel or reverse proxy that terminates TLS on
-  port 443
+- An interactive logged-in desktop session
+- Python 3.11 or newer; the installer can install Python with WinGet
+- Administrator PowerShell for OS-wide Full-mode operations and highest-privilege autostart
+- A private Custom GPT for the no-API-cost ChatGPT path
 
-## Install
+## One-command bootstrap
+
+Open **PowerShell as Administrator**:
 
 ```powershell
-
 git clone https://github.com/Emad211/Desktop-MCP-Bridge.git
 cd Desktop-MCP-Bridge
 git switch feat/initial-desktop-bridge
 Set-ExecutionPolicy -Scope Process Bypass
-.\scripts\install.ps1
+.\scripts\bootstrap.ps1 `
+  -FullAccess `
+  -Autonomous `
+  -InstallAutostart `
+  -StartNow `
+  -RunSelfTest `
+  -IUnderstand
 ```
 
-## Run the MCP server
+This performs the following:
 
-### Safe profile
+1. creates/updates `.venv`;
+2. installs the bridge and development checks;
+3. installs managed Chromium for Playwright;
+4. installs Tesseract OCR when missing;
+5. generates a strong Action key;
+6. stores the key encrypted for the current Windows user with DPAPI;
+7. writes the chosen profile and approval policy into local bootstrap metadata;
+8. optionally installs an interactive logon scheduled task.
+
+The key is printed once and is also stored at:
+
+```text
+%LOCALAPPDATA%\DesktopMCPBridge\action-key.clixml
+```
+
+## Start the Action Gateway
+
+Full Autonomous mode:
 
 ```powershell
-.\scripts\run.ps1 -AllowedRoot "D:\AI-Workspace" -Profile safe
+.\scripts\run-actions.ps1 -FullAccess -Autonomous -IUnderstand
 ```
 
-### Developer profile
+Full Guarded mode:
 
 ```powershell
-.\scripts\run.ps1 -AllowedRoot "D:\AI-Workspace" -Profile developer
+.\scripts\run-actions.ps1 -FullAccess -IUnderstand
 ```
 
-### Full profile
+The server listens only on:
 
-Open PowerShell as Administrator when OS-wide administration is required:
+```text
+http://127.0.0.1:8766
+```
+
+### Temporary HTTPS tunnel for testing
+
+Open a second PowerShell:
 
 ```powershell
-.\scripts\run-full-mcp.ps1 -Transport stdio -IUnderstand
+.\scripts\run-quick-tunnel.ps1 -Port 8766 -InstallIfMissing
 ```
+
+Quick Tunnel URLs change whenever the tunnel restarts. For a stable hostname:
+
+```powershell
+.\scripts\setup-named-tunnel.ps1 `
+  -TunnelName desktop-agent `
+  -Hostname desktop-agent.example.com `
+  -InstallIfMissing
+```
+
+## Configure the private GPT
+
+1. Create a private GPT.
+2. Choose a model that supports Actions.
+3. Copy `gpt/INSTRUCTIONS.md` into the GPT instructions.
+4. Add an Action and import `gpt-actions.openapi.yaml`.
+5. Replace `https://YOUR_PUBLIC_HTTPS_HOST` with the tunnel URL/hostname.
+6. Choose API Key authentication in Bearer format.
+7. Paste the generated key.
+8. Keep the GPT private.
+9. Test `healthCheck`, `observeComputer`, and `getScreenCapture`.
+
+## Access profiles
+
+| Capability | Safe | Developer | Full |
+|---|:---:|:---:|:---:|
+| Desktop screenshot/input | ✓ | ✓ | ✓ |
+| Windows UI Automation | ✓ | ✓ | ✓ |
+| OCR | ✓ | ✓ | ✓ |
+| Managed browser | ✓ | ✓ | ✓ |
+| Files under configured roots | ✓ | ✓ | ✓ |
+| Files anywhere allowed by Windows | — | — | ✓ |
+| Allowlisted shell | ✓ | ✓ | — |
+| Unrestricted shell | — | — | ✓ |
+| Delete files | — | ✓ | ✓ |
+| Recursive delete | — | — | ✓ |
+| Process termination | — | ✓ | ✓ |
+| Clipboard | — | ✓ | ✓ |
+| Registry/services/packages/network/tasks/power | — | — | ✓ |
 
 Full mode requires both:
 
@@ -108,161 +170,105 @@ DMB_ACCESS_PROFILE=full
 DMB_FULL_ACCESS_CONFIRMATION=I UNDERSTAND THIS GRANTS FULL CONTROL
 ```
 
-This deliberate two-part opt-in prevents a typo or copied environment file from silently granting
-full control.
+It removes bridge-level path and command restrictions but does not bypass Windows ACLs, UAC, account
+separation, or endpoint protection.
 
-## Run the private GPT Action Gateway
+## Guarded versus Autonomous
 
-Generate a random key:
+`DMB_APPROVAL_POLICY=guarded` requires an extra `CONFIRM:<operation>` value for high-risk Action calls.
+`autonomous` removes that extra bridge prompt while retaining ChatGPT's consequential Action UI,
+idempotency, audit logs, and the local kill switch.
 
-```powershell
-$ActionKey = .\scripts\new-action-key.ps1
-```
+## Idempotent Action calls
 
-Safe mode:
+Every `/v1/act` request requires `request_id`.
 
-```powershell
-.\scripts\run-actions.ps1 `
-  -ApiKey $ActionKey `
-  -AllowedRoot "D:\AI-Workspace" `
-  -Profile safe
-```
+- Generate a new UUID for each logical action.
+- Reuse it only to retry the exact same request after a timeout.
+- The bridge returns the cached result instead of executing twice.
+- Reusing an ID with different arguments is rejected.
 
-Full mode:
+This is especially important for file deletion, package installation, process termination, and command
+jobs.
 
-```powershell
-.\scripts\run-actions.ps1 `
-  -ApiKey $ActionKey `
-  -FullAccess `
-  -IUnderstand
-```
+## Desktop vision
 
-The gateway listens only on:
+### Direct screenshot
+
+`getScreenCapture` returns the current monitor as PNG.
+
+### Signed screenshot artifact
+
+`capture_desktop_artifact` stores a short-lived local image and returns a signed URL. The URL is
+unguessable, expires automatically, and does not expose a permanent unauthenticated file route.
+
+### OCR
+
+`screen_ocr` returns:
+
+- extracted text;
+- confidence per token;
+- x/y/width/height bounding boxes;
+- monitor/capture geometry;
+- optional screenshot artifact.
+
+Use OCR when native UI Automation does not expose the text. Use coordinate clicks only against a
+current capture, never an old screen.
+
+## Managed browser
+
+The browser has its own persistent profile under the per-user bridge state directory. It does not
+silently share the normal Chrome password manager or profile.
+
+Recommended loop:
 
 ```text
-http://127.0.0.1:8766
+browser_start
+→ browser_navigate
+→ browser_snapshot
+→ browser_interact
+→ browser_snapshot or browser_screenshot
 ```
 
-For a temporary test URL, open a second PowerShell and run:
-
-```powershell
-.\scripts\run-quick-tunnel.ps1 -Port 8766 -InstallIfMissing
-```
-
-Copy the generated `https://...trycloudflare.com` URL into `gpt-actions.openapi.yaml`. Quick Tunnels
-are temporary and intended for testing; use a named authenticated tunnel and stable hostname for
-regular use. Place a secure HTTPS tunnel or authenticated reverse proxy in front of the bridge. Do
-not bind the Python server directly to `0.0.0.0`, forward the port from your router, or publish the
-bearer token.
-
-### Configure a private GPT
-
-1. Create a private GPT in ChatGPT.
-2. Choose a model that supports GPT Actions rather than Pro mode.
-3. Copy `gpt/INSTRUCTIONS.md` into the GPT instructions.
-4. Add an Action and import `gpt-actions.openapi.yaml`.
-5. Replace `https://YOUR_PUBLIC_HTTPS_HOST` with the HTTPS tunnel hostname.
-6. Configure API-key authentication using Bearer format and paste `$ActionKey`.
-7. Keep the GPT private.
-8. Test `healthCheck`, then `observeComputer` with operation `status`.
-
-All state-changing requests use the consequential `controlComputer` action, allowing ChatGPT's
-confirmation flow to remain visible to the user.
-
-## Available operations
-
-### Observation
-
-- `status`
-- `system_info`
-- `observe_desktop` — MCP image output
-- `list_directory`
-- `read_text_file`
-- `read_binary_file`
-- `get_command_job`
-- `list_command_jobs`
-- `list_processes`
-- `clipboard_read`
-- `list_windows`
-- `uia_tree`
-- `registry_get`
-- `audit_tail`
-
-### Control
-
-- `desktop_step`
-- `write_text_file`
-- `write_binary_file`
-- `copy_path`
-- `move_path`
-- `delete_path`
-- `run_command`
-- `start_command_job`
-- `cancel_command_job`
-- `stop_process`
-- `clipboard_write`
-- `window_control`
-- `uia_invoke`
-- `registry_set`
-- `registry_delete`
-- `service_control`
-- `package_manage`
-- `network_admin`
-- `scheduled_task_control`
-- `power_control`
-
-## Long-running command pattern
-
-Start work without blocking the Action request:
+Selectors:
 
 ```json
-{
-  "operation": "start_command_job",
-  "arguments": {
-    "command": "gradlew.bat build",
-    "cwd": "D:/Projects/MyApp"
-  }
-}
+{"kind":"role","role":"button","name":"Submit"}
+{"kind":"label","value":"Email"}
+{"kind":"text","value":"Download","exact":true}
+{"kind":"placeholder","value":"Search"}
+{"kind":"testid","value":"save-button"}
+{"kind":"css","value":"#save"}
 ```
 
-Poll it:
+Supported interactions include click, double-click, fill, sequential type, press, check, uncheck,
+select, hover, and focus. The snapshot includes an ARIA representation, visible interactive elements,
+console messages, and page errors.
 
-```json
-{
-  "operation": "get_command_job",
-  "arguments": {
-    "job_id": "returned-job-id",
-    "tail_bytes": 50000
-  }
-}
-```
+## Native Windows applications
 
-Cancel if needed:
-
-```json
-{
-  "operation": "cancel_command_job",
-  "arguments": {
-    "job_id": "returned-job-id",
-    "force": true
-  }
-}
-```
-
-## UI Automation before coordinate clicks
-
-For supported Windows applications, prefer:
+Prefer semantic automation:
 
 ```text
 list_windows → uia_tree → uia_invoke → uia_tree
 ```
 
-This uses accessible UI elements and is usually more reliable than fixed screen coordinates. Use
-`desktop_step` when an application does not expose usable automation elements.
+Use `desktop_step` only when an application does not expose useful UI Automation elements.
+
+## Long-running commands
+
+Do not run builds or installers synchronously through GPT Actions. Use:
+
+```text
+start_command_job → get_command_job → get_command_job ...
+```
+
+The job output is persisted under the per-user bridge state directory and can be cancelled, including
+its process tree.
 
 ## Kill switch
 
-Stop all mutating operations locally even if the remote session remains active:
+Block all mutating operations immediately:
 
 ```powershell
 .\scripts\kill-switch.ps1 -Mode Enable
@@ -275,74 +281,97 @@ Inspect or re-enable:
 .\scripts\kill-switch.ps1 -Mode Disable
 ```
 
-Read-only status and audit inspection remain available so the operator can diagnose the situation.
+Read-only status and audit tools remain available for diagnosis.
 
-## Audit trail
+## Diagnostics
 
-Every operation records:
+```powershell
+.\scripts\diagnose.ps1 -TestScreen
+```
 
-- UTC timestamp
-- source (`mcp`, `gpt-action`, or local)
-- operation name
-- redacted arguments
-- success/failure
-- bounded result or error
+Diagnostics check installation, imports, OpenAPI generation, Tesseract, Playwright browser files,
+encrypted key presence, port usage, administrator state, kill switch state, and optional live capture.
 
-The default JSONL file is in the Windows per-user application state directory. Its exact path is
-returned by `status`. Common password/token/API-key fields are redacted before writing.
+
+## Operational lifecycle
+
+Start the gateway in the background and wait for health:
+
+```powershell
+.\scripts\start-gateway.ps1 -FullAccess -Autonomous -IUnderstand
+```
+
+Inspect all local state:
+
+```powershell
+.\scripts\status.ps1
+```
+
+Run an end-to-end test against the live gateway:
+
+```powershell
+.\scripts\self-test.ps1
+```
+
+Start/stop a machine-readable Quick Tunnel:
+
+```powershell
+$Tunnel = .\scripts\start-quick-tunnel.ps1 -InstallIfMissing | ConvertFrom-Json
+.\scripts\stop-quick-tunnel.ps1
+```
+
+Generate ready-to-import GPT files for that URL:
+
+```powershell
+.\scripts\export-gpt-config.ps1 -PublicBaseUrl $Tunnel.url
+```
+
+Stop the gateway process tree:
+
+```powershell
+.\scripts\stop-gateway.ps1
+```
+
+The complete Persian installation prompt for a local desktop agent is stored in
+`docs/DESKTOP_AGENT_INSTALL_PROMPT_FA.md`.
+
+## MCP usage
+
+Safe/developer profile:
+
+```powershell
+.\scripts\run.ps1 -AllowedRoot "D:\AI-Workspace" -Profile developer
+```
+
+Full profile:
+
+```powershell
+.\scripts\run-full-mcp.ps1 -Transport stdio -IUnderstand
+```
 
 ## Security boundaries
 
-- Full mode removes project root and command allowlist restrictions; it does **not** defeat Windows
-  ACLs, UAC, endpoint protection, or account separation.
-- No credential dumping, keylogging, anti-malware bypass, hidden persistence, or stealth facilities
-  are implemented.
-- `pyautogui` fail-safe remains enabled: moving the pointer rapidly to the upper-left corner can
-  interrupt visual automation.
-- The bearer key is authentication, not transport encryption. HTTPS is still mandatory remotely.
-- A private GPT endpoint controls the Windows account that runs it. Treat the endpoint and key like
-  a remote-administration credential.
-- Prefer a separate Windows account or VM for highly autonomous sessions.
+- No credential dumping, keylogging, endpoint-protection bypass, hidden persistence, or stealth tools.
+- PyAutoGUI's upper-left-corner fail-safe remains active.
+- The Action gateway binds to localhost by default.
+- Bearer authentication does not replace HTTPS.
+- Artifact links are signed and short-lived.
+- Audit records redact common password/token/API-key fields and matching command-line patterns.
+- Autostart is an explicit visible Scheduled Task and can be removed with
+  `scripts/uninstall-autostart.ps1`.
+- Use a separate Windows account or VM for highly autonomous work that should not reach personal data.
 
-See `SECURITY.md` and `docs/THREAT_MODEL.md`.
-
-## Local MCP client example
-
-```json
-{
-  "mcpServers": {
-    "desktop-bridge": {
-      "command": "C:\\path\\Desktop-MCP-Bridge\\.venv\\Scripts\\desktop-mcp-bridge.exe",
-      "args": ["mcp"],
-      "env": {
-        "DMB_TRANSPORT": "stdio",
-        "DMB_ACCESS_PROFILE": "developer",
-        "DMB_ALLOWED_ROOTS": "[\"D:/AI-Workspace\"]"
-      }
-    }
-  }
-}
-```
+See `SECURITY.md`, `docs/THREAT_MODEL.md`, and `docs/PRIVACY.md`.
 
 ## Testing
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest
-.\.venv\Scripts\ruff.exe check .
+.\.venv\Scripts\python.exe -m compileall -q src
+.\.venv\Scripts\python.exe -m ruff check .
+.\.venv\Scripts\python.exe -m pytest --cov=desktop_mcp_bridge --cov-report=term-missing
 ```
 
-CI runs on Windows with Python 3.11 and 3.12.
-
-## Roadmap
-
-- Signed Windows installer and tray UI
-- One-click named Cloudflare Tunnel bootstrap
-- Local approval dashboard and per-operation grants
-- Persisted/recoverable job metadata after bridge restart
-- Named-pipe local control channel
-- Multi-monitor visual coordinate mapping
-- Browser automation adapter using Playwright/CDP
-- File upload/download handling for the GPT Action route
+GitHub Actions runs the suite on Windows with Python 3.11 and 3.12.
 
 ## License
 

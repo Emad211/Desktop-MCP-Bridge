@@ -1,11 +1,21 @@
 from __future__ import annotations
+
 import os
 import subprocess
 from pathlib import Path
 from typing import Any
+
 import psutil
+
 from ..config import CommandRequest
-from ..security import SecurityViolation, require_capability, require_full_access, resolve_allowed_path, validate_command
+from ..security import (
+    SecurityViolation,
+    require_capability,
+    require_full_access,
+    resolve_allowed_path,
+    validate_command,
+)
+
 
 class ProcessToolsMixin:
 

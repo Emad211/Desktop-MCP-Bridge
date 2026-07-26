@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, "feat/**"]
+    branches: [main, "feat/**", "build/**"]
   pull_request:
 
 permissions:
@@ -24,6 +24,21 @@ jobs:
       - run: python -m pip install --upgrade pip
       - run: python -m pip install -e ".[dev]"
       - run: python -m compileall -q src
+      - name: Parse PowerShell scripts
+        shell: pwsh
+        run: |
+          $Failed = $false
+          Get-ChildItem scripts -Filter *.ps1 -Recurse | ForEach-Object {
+            $Tokens = $null
+            $Errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$Tokens, [ref]$Errors)
+            if ($Errors.Count -gt 0) {
+              $Failed = $true
+              Write-Host "PowerShell parse errors in $($_.FullName)" -ForegroundColor Red
+              $Errors | Format-List | Out-String | Write-Host
+            }
+          }
+          if ($Failed) { exit 1 }
       - name: Ruff
         id: ruff
         shell: pwsh
@@ -45,4 +60,4 @@ jobs:
       - name: Validate imports and Action OpenAPI generation
         shell: pwsh
         run: |
-          python -c "from desktop_mcp_bridge.server import mcp; from desktop_mcp_bridge.action_api import app; s=app.openapi(); assert s['openapi'].startswith('3.'); assert '/v1/act' in s['paths']; print(s['openapi'], mcp.name)"
+          python -c "from desktop_mcp_bridge.server import mcp; from desktop_mcp_bridge.action_api import app; s=app.openapi(); assert s['openapi'].startswith('3.'); assert '/v1/act' in s['paths']; assert '/v1/screenshot' in s['paths']; print(s['openapi'], mcp.name)"

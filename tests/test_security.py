@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from desktop_mcp_bridge.config import BridgeSettings, FULL_ACCESS_CONFIRMATION
+from desktop_mcp_bridge.config import FULL_ACCESS_CONFIRMATION, BridgeSettings
 from desktop_mcp_bridge.security import SecurityViolation, resolve_allowed_path, validate_command
 
 

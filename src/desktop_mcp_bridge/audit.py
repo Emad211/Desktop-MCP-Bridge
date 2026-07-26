@@ -37,9 +37,8 @@ class AuditLogger:
         }
         self.path.parent.mkdir(parents=True, exist_ok=True)
         line = json.dumps(entry, ensure_ascii=False, default=str) + "\n"
-        with self._lock:
-            with self.path.open("a", encoding="utf-8", newline="\n") as handle:
-                handle.write(line)
+        with self._lock, self.path.open("a", encoding="utf-8", newline="\n") as handle:
+            handle.write(line)
 
     def tail(self, limit: int = 100) -> list[dict[str, Any]]:
         if not self.path.exists():
