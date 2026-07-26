@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import io
+import os
+import shutil
 import time
+from pathlib import Path
 from typing import Any
 
 from ..security import require_capability
@@ -45,7 +48,10 @@ class VisionToolsMixin:
             }
 
         return self._execute(
-            "capture_desktop_artifact", arguments, operation, source=source
+            "capture_desktop_artifact",
+            arguments,
+            operation,
+            source=source,
         )
 
     def screen_ocr(
@@ -73,11 +79,12 @@ class VisionToolsMixin:
                 from PIL import Image as PILImage
             except ImportError as exc:
                 raise RuntimeError(
-                    "OCR dependencies are missing. Re-run scripts/install.ps1 without -SkipOCR."
+                    "OCR dependencies are missing. Re-run scripts/install.ps1."
                 ) from exc
 
-            if self.settings.tesseract_command:
-                pytesseract.pytesseract.tesseract_cmd = self.settings.tesseract_command
+            command = _find_tesseract(self.settings.tesseract_command)
+            if command is not None:
+                pytesseract.pytesseract.tesseract_cmd = str(command)
 
             data, metadata = self.observe_desktop_bytes(
                 monitor=monitor,
@@ -89,7 +96,9 @@ class VisionToolsMixin:
             try:
                 config = ""
                 if self.settings.tessdata_dir:
-                    config = f'--tessdata-dir "{self.settings.tessdata_dir}"'
+                    config = (
+                        f'--tessdata-dir "{self.settings.tessdata_dir}"'
+                    )
                 ocr = pytesseract.image_to_data(
                     image,
                     lang=language,
@@ -98,7 +107,8 @@ class VisionToolsMixin:
                 )
             except pytesseract.TesseractNotFoundError as exc:
                 raise RuntimeError(
-                    "Tesseract was not found. Install it or set DMB_TESSERACT_COMMAND."
+                    "Tesseract was not found. Install it or set "
+                    "DMB_TESSERACT_COMMAND."
                 ) from exc
 
             items: list[dict[str, Any]] = []
@@ -121,10 +131,18 @@ class VisionToolsMixin:
                         "width": int(ocr["width"][index]),
                         "height": int(ocr["height"][index]),
                     },
-                    "page": int(ocr.get("page_num", [1] * count)[index]),
-                    "block": int(ocr.get("block_num", [0] * count)[index]),
-                    "paragraph": int(ocr.get("par_num", [0] * count)[index]),
-                    "line": int(ocr.get("line_num", [0] * count)[index]),
+                    "page": int(
+                        ocr.get("page_num", [1] * count)[index]
+                    ),
+                    "block": int(
+                        ocr.get("block_num", [0] * count)[index]
+                    ),
+                    "paragraph": int(
+                        ocr.get("par_num", [0] * count)[index]
+                    ),
+                    "line": int(
+                        ocr.get("line_num", [0] * count)[index]
+                    ),
                 }
                 items.append(item)
                 lines.append(text)
@@ -134,6 +152,9 @@ class VisionToolsMixin:
                 "items": items,
                 "count": len(items),
                 "language": language,
+                "tesseract_command": (
+                    None if command is None else str(command)
+                ),
                 "capture": metadata,
             }
             if include_image:
@@ -145,4 +166,37 @@ class VisionToolsMixin:
                 )
             return result
 
-        return self._execute("screen_ocr", arguments, operation, source=source)
+        return self._execute(
+            "screen_ocr",
+            arguments,
+            operation,
+            source=source,
+        )
+
+
+def _find_tesseract(configured: str) -> Path | None:
+    if configured:
+        path = Path(configured).expanduser()
+        if path.exists():
+            return path.resolve()
+    command = shutil.which("tesseract")
+    if command:
+        return Path(command).resolve()
+    if os.name != "nt":
+        return None
+    candidates = [
+        Path(os.environ.get("PROGRAMFILES", ""))
+        / "Tesseract-OCR"
+        / "tesseract.exe",
+        Path(os.environ.get("PROGRAMFILES(X86)", ""))
+        / "Tesseract-OCR"
+        / "tesseract.exe",
+        Path(os.environ.get("LOCALAPPDATA", ""))
+        / "Programs"
+        / "Tesseract-OCR"
+        / "tesseract.exe",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate.resolve()
+    return None
