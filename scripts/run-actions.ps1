@@ -41,15 +41,8 @@ $env:DMB_ACTION_HOST = "127.0.0.1"
 $env:DMB_ACTION_PORT = "$Port"
 $env:DMB_ACTION_API_KEY = $ApiKey
 $env:DMB_APPROVAL_POLICY = $(if ($Autonomous) { "autonomous" } else { "guarded" })
-$env:PLAYWRIGHT_BROWSERS_PATH = (Join-Path $RepoRoot ".playwright-browsers")
-$env:DMB_TESSDATA_DIR = (Join-Path $env:LOCALAPPDATA "DesktopMCPBridge\tessdata")
 
-$TesseractCandidates = @(
-    "$env:ProgramFiles\Tesseract-OCR\tesseract.exe",
-    "${env:ProgramFiles(x86)}\Tesseract-OCR\tesseract.exe",
-    "$env:LOCALAPPDATA\Programs\Tesseract-OCR\tesseract.exe"
-) | Where-Object { $_ -and (Test-Path $_) }
-if ($TesseractCandidates) { $env:DMB_TESSERACT_COMMAND = $TesseractCandidates[0] }
+& (Join-Path $PSScriptRoot "set-runtime-environment.ps1") -RepoRoot $RepoRoot
 
 if ($Profile -eq "full") {
     $env:DMB_FULL_ACCESS_CONFIRMATION = "I UNDERSTAND THIS GRANTS FULL CONTROL"
@@ -61,7 +54,10 @@ if ($Profile -eq "full") {
     }
 }
 
-Write-Host "Desktop Action Gateway v1.0 starting on 127.0.0.1:$Port" -ForegroundColor Cyan
+$BrowserChannel = $env:DMB_BROWSER_CHANNEL
+if ([string]::IsNullOrWhiteSpace($BrowserChannel)) { $BrowserChannel = "auto" }
+Write-Host "Desktop Action Gateway v1.1 starting on 127.0.0.1:$Port" -ForegroundColor Cyan
 Write-Host "Profile: $Profile | Approval policy: $env:DMB_APPROVAL_POLICY" -ForegroundColor Cyan
+Write-Host "Browser channel: $BrowserChannel" -ForegroundColor DarkGray
 Write-Host "Keep this window open. Use the STOP-file kill switch for emergency shutdown of mutations." -ForegroundColor Yellow
 & .\.venv\Scripts\python.exe -m desktop_mcp_bridge actions

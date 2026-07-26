@@ -70,6 +70,8 @@ class DesktopBridge(
             self.settings.browser_profile_path,
             self.settings.browser_downloads_path,
             self.settings.browser_headless,
+            preferred_channel=self.settings.browser_channel,
+            executable_path=self.settings.browser_executable_path,
         )
 
     def _execute(
@@ -121,6 +123,12 @@ class DesktopBridge(
             "artifact_path": str(settings.artifact_path),
             "browser_profile_path": str(settings.browser_profile_path),
             "browser_downloads_path": str(settings.browser_downloads_path),
+            "browser_channel": settings.browser_channel,
+            "browser_executable_path": (
+                None
+                if settings.browser_executable_path is None
+                else str(settings.browser_executable_path)
+            ),
             "allowed_roots": [str(path) for path in settings.allowed_roots],
             "capabilities": {
                 "desktop_control": settings.enable_desktop_control,

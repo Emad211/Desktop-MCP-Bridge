@@ -68,6 +68,8 @@ class BridgeSettings(BaseSettings):
     tesseract_command: str = ""
     tessdata_dir: Path | None = None
     browser_headless: bool = False
+    browser_channel: Literal["auto", "chromium", "msedge", "chrome"] = "auto"
+    browser_executable_path: Path | None = None
 
     audit_log_path: Path = Field(default_factory=lambda: _state_path("audit.jsonl"))
     kill_switch_path: Path = Field(default_factory=lambda: _state_path("STOP"))
@@ -128,7 +130,7 @@ class BridgeSettings(BaseSettings):
     def normalize_roots(cls, roots: list[Path]) -> list[Path]:
         return [root.expanduser().resolve() for root in roots]
 
-    @field_validator("tessdata_dir", mode="after")
+    @field_validator("tessdata_dir", "browser_executable_path", mode="after")
     @classmethod
     def normalize_optional_path(cls, path: Path | None) -> Path | None:
         return None if path is None else path.expanduser().resolve()

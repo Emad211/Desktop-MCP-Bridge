@@ -24,8 +24,7 @@ $env:DMB_ACCESS_PROFILE = $Profile
 $env:DMB_TRANSPORT = $Transport
 $env:DMB_HOST = "127.0.0.1"
 $env:DMB_PORT = "$Port"
-$env:PLAYWRIGHT_BROWSERS_PATH = (Join-Path $RepoRoot ".playwright-browsers")
-$env:DMB_TESSDATA_DIR = (Join-Path $env:LOCALAPPDATA "DesktopMCPBridge\tessdata")
 Remove-Item Env:DMB_FULL_ACCESS_CONFIRMATION -ErrorAction SilentlyContinue
 
+& (Join-Path $PSScriptRoot "set-runtime-environment.ps1") -RepoRoot $RepoRoot
 & .\.venv\Scripts\python.exe -m desktop_mcp_bridge mcp

@@ -19,8 +19,8 @@ $env:DMB_ALLOWED_ROOTS = '["C:/"]'
 $env:DMB_TRANSPORT = $Transport
 $env:DMB_HOST = "127.0.0.1"
 $env:DMB_PORT = "$Port"
-$env:PLAYWRIGHT_BROWSERS_PATH = (Join-Path $RepoRoot ".playwright-browsers")
-$env:DMB_TESSDATA_DIR = (Join-Path $env:LOCALAPPDATA "DesktopMCPBridge\tessdata")
+
+& (Join-Path $PSScriptRoot "set-runtime-environment.ps1") -RepoRoot $RepoRoot
 
 $Admin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
     [Security.Principal.WindowsBuiltInRole]::Administrator
