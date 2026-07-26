@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.1.0
+
+- Added self-elevating bootstrap and deployment repair with UAC handoff.
+- Preserved existing DPAPI Action keys unless explicit rotation is requested.
+- Added managed Chromium fallback to installed Microsoft Edge and Google Chrome when the Playwright CDN is blocked.
+- Added automatic Tesseract discovery on every runtime start.
+- Added V2Ray, WinINET, WinHTTP, environment, PAC, and common loopback proxy detection.
+- Added direct/proxy route probing and multi-provider tunnel selection.
+- Added proxy-aware ngrok and Cloudflare tunnel launchers.
+- Added stable Tailscale Funnel support and explicit VPN-conflict guidance.
+- Added a tunnel supervisor that recovers after VPN/network transitions.
+- Added unified tunnel state, public endpoint verification, endpoint-change reporting, and tunnel autostart.
+- Added a self-elevating repair workflow for Gateway, Autostart, Browser, OCR, Tunnel, and GPT config export.
+- Expanded diagnostics and status output for browser backends, VPN routes, public health, and scheduled tasks.
+- Added browser fallback unit tests and Windows PowerShell compatibility fixes.
+
 ## 1.0.0
 
 - Added private GPT Action Gateway with Bearer authentication.
