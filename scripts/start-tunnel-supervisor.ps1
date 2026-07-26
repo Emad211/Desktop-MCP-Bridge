@@ -40,18 +40,25 @@ $Arguments = @(
     "-NetworkMode", $NetworkMode,
     "-Port", "$Port"
 )
-if ($NgrokAuthToken) { $Arguments += @("-NgrokAuthToken", ('"{0}"' -f $NgrokAuthToken)) }
 if ($InstallIfMissing) { $Arguments += "-InstallIfMissing" }
 if ($LoginIfNeeded) { $Arguments += "-LoginIfNeeded" }
 if ($AllowEphemeral) { $Arguments += "-AllowEphemeral" }
 
-Remove-Item $OutLog, $ErrLog -Force -ErrorAction SilentlyContinue
-$Process = Start-Process -FilePath "powershell.exe" `
-    -ArgumentList ($Arguments -join " ") `
-    -WindowStyle Minimized `
-    -RedirectStandardOutput $OutLog `
-    -RedirectStandardError $ErrLog `
-    -PassThru
+$PreviousToken = [Environment]::GetEnvironmentVariable("NGROK_AUTHTOKEN", "Process")
+if ($NgrokAuthToken) {
+    [Environment]::SetEnvironmentVariable("NGROK_AUTHTOKEN", $NgrokAuthToken, "Process")
+}
+try {
+    Remove-Item $OutLog, $ErrLog -Force -ErrorAction SilentlyContinue
+    $Process = Start-Process -FilePath "powershell.exe" `
+        -ArgumentList ($Arguments -join " ") `
+        -WindowStyle Minimized `
+        -RedirectStandardOutput $OutLog `
+        -RedirectStandardError $ErrLog `
+        -PassThru
+} finally {
+    [Environment]::SetEnvironmentVariable("NGROK_AUTHTOKEN", $PreviousToken, "Process")
+}
 
 $Deadline = (Get-Date).AddSeconds(20)
 do {
