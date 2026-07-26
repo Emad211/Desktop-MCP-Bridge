@@ -6,12 +6,25 @@ param(
 
 $ErrorActionPreference = "Stop"
 $StateDir = Join-Path $env:LOCALAPPDATA "DesktopMCPBridge"
+$CallerAdministrator = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
+    [Security.Principal.WindowsBuiltInRole]::Administrator
+)
 $Health = $null
 try { $Health = Invoke-RestMethod -Uri "$($BaseUrl.TrimEnd('/'))/health" -TimeoutSec 3 } catch {}
+$Port = ([uri]$BaseUrl).Port
+$Listeners = @(Get-NetTCPConnection -LocalAddress "127.0.0.1" -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)
+$ListenerProcessIds = @($Listeners | Select-Object -ExpandProperty OwningProcess -Unique)
+
 $State = [ordered]@{
     online = [bool]$Health
     health = $Health
-    administrator = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    caller_administrator = $CallerAdministrator
+    administrator = $null
+    gateway_administrator = $null
+    gateway_process_id = $null
+    listener_process_ids = $ListenerProcessIds
+    multiple_gateway_listeners = $ListenerProcessIds.Count -gt 1
+    gateway_identity_consistent = $null
     kill_switch_active = Test-Path (Join-Path $StateDir "STOP")
     encrypted_key_present = Test-Path $EncryptedKeyPath
     gateway_state = $null
@@ -40,6 +53,21 @@ if ($Health -and (Test-Path $EncryptedKeyPath)) {
     $Body = @{ operation = "status"; arguments = @{} } | ConvertTo-Json -Depth 10
     try {
         $State.bridge = Invoke-RestMethod -Method Post -Uri "$($BaseUrl.TrimEnd('/'))/v1/observe" -Headers $Headers -ContentType "application/json" -Body $Body -TimeoutSec 5
+        if ($State.bridge.ok -eq $true -and $State.bridge.result) {
+            $Gateway = $State.bridge.result
+            $State.gateway_process_id = [int]$Gateway.process_id
+            $State.gateway_administrator = [bool]$Gateway.administrator
+            $State.administrator = [bool]$Gateway.administrator
+            $State.gateway_identity_consistent = (
+                $ListenerProcessIds.Count -eq 1 -and
+                [int]$ListenerProcessIds[0] -eq [int]$Gateway.process_id -and
+                (
+                    -not $State.gateway_state -or
+                    -not $State.gateway_state.gateway_pid -or
+                    [int]$State.gateway_state.gateway_pid -eq [int]$Gateway.process_id
+                )
+            )
+        }
     } catch {
         $State.bridge_error = $_.Exception.Message
     }

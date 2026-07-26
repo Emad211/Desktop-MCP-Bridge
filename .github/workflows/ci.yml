@@ -39,6 +39,35 @@ jobs:
             }
           }
           if ($Failed) { exit 1 }
+      - name: Validate machine-readable diagnostics
+        id: diagnostics
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          try {
+            $Raw = .\scripts\diagnose.ps1 -Quick
+            $Raw | Set-Content -Path diagnostics-output.txt -Encoding UTF8
+            $Diagnostics = $Raw | ConvertFrom-Json
+            if ($Diagnostics.imports_openapi -ne $true) { throw "Diagnostics import/OpenAPI check failed." }
+            if ($Diagnostics.imports_openapi_output -notmatch "imports/openapi: ok") { throw "Diagnostics captured no import output." }
+            $Diagnostics | ConvertTo-Json -Depth 8
+          } catch {
+            $_ | Format-List * -Force | Out-String | Tee-Object -FilePath diagnostics-error.txt
+            exit 1
+          }
+      - name: Upload diagnostics output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: diagnostics-${{ matrix.python-version }}
+          path: |
+            diagnostics-output.txt
+            diagnostics-error.txt
+          if-no-files-found: ignore
+      - name: Fail if diagnostics failed
+        if: steps.diagnostics.outcome == 'failure'
+        shell: pwsh
+        run: exit 1
       - name: Validate Windows network detector
         id: network_detector
         shell: pwsh
@@ -89,4 +118,4 @@ jobs:
       - name: Validate imports and Action OpenAPI generation
         shell: pwsh
         run: |
-          python -c "from desktop_mcp_bridge import __version__; from desktop_mcp_bridge.server import mcp; from desktop_mcp_bridge.action_api import app; s=app.openapi(); assert __version__ == '1.1.0'; assert s['openapi'].startswith('3.'); assert '/v1/act' in s['paths']; assert '/v1/screenshot' in s['paths']; print(s['openapi'], mcp.name, __version__)"
+          python -c "from desktop_mcp_bridge import __version__; from desktop_mcp_bridge.server import mcp; from desktop_mcp_bridge.action_api import app; s=app.openapi(); assert __version__ == '1.2.0'; assert s['openapi'].startswith('3.'); assert '/v1/act' in s['paths']; assert '/v1/screenshot' in s['paths']; print(s['openapi'], mcp.name, __version__)"

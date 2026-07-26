@@ -14,6 +14,7 @@ def test_static_openapi_operations_match_gateway() -> None:
     assert set(observe) == set(get_args(ReadOperation))
     assert set(actions) == set(get_args(WriteOperation))
     assert schema["openapi"].startswith("3.1")
+    assert schema["info"]["version"] == "1.2.0"
 
 
 def test_generated_openapi_exposes_artifacts_and_screenshot() -> None:
@@ -21,4 +22,4 @@ def test_generated_openapi_exposes_artifacts_and_screenshot() -> None:
     assert "/v1/screenshot" in schema["paths"]
     assert "/v1/observe" in schema["paths"]
     assert "/v1/act" in schema["paths"]
-    assert schema["info"]["version"] == "1.1.0"
+    assert schema["info"]["version"] == "1.2.0"
