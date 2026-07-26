@@ -42,11 +42,13 @@ if (-not $Status -or $Status.BackendState -ne "Running") {
     }
     Write-Host "Tailscale login/consent may open in a browser." -ForegroundColor Yellow
     & $Tailscale up
-    if ($LASTEXITCODE -ne 0) { throw "tailscale up failed: $LASTEXITCODE" }
+    if ($LASTEXITCODE -ne 0) {
+        throw "tailscale up failed. V2Ray TUN mode or another VPN adapter may conflict with Tailscale; try V2Ray system-proxy mode or use ngrok. Exit code: $LASTEXITCODE"
+    }
     $Status = (& $Tailscale status --json | ConvertFrom-Json)
 }
 
-$Output = & $Tailscale funnel --bg --https=443 "http://127.0.0.1:$Port" 2>&1
+$Output = & $Tailscale funnel --yes --bg --https=443 "http://127.0.0.1:$Port" 2>&1
 if ($LASTEXITCODE -ne 0) {
     throw "Tailscale Funnel failed. Output: $($Output | Out-String)"
 }
