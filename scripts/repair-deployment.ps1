@@ -53,16 +53,21 @@ function Invoke-SelfElevated {
             $Arguments += "-$SwitchName"
         }
     }
+    $PreviousToken = [Environment]::GetEnvironmentVariable("NGROK_AUTHTOKEN", "Process")
     if ($NgrokAuthToken) {
-        $Arguments += @("-NgrokAuthToken", ('"{0}"' -f $NgrokAuthToken))
+        [Environment]::SetEnvironmentVariable("NGROK_AUTHTOKEN", $NgrokAuthToken, "Process")
     }
     Write-Host "Opening an elevated repair session. Approve the UAC prompt." -ForegroundColor Yellow
-    $Child = Start-Process -FilePath "powershell.exe" `
-        -ArgumentList ($Arguments -join " ") `
-        -WorkingDirectory $RepoRoot `
-        -Verb RunAs `
-        -Wait `
-        -PassThru
+    try {
+        $Child = Start-Process -FilePath "powershell.exe" `
+            -ArgumentList ($Arguments -join " ") `
+            -WorkingDirectory $RepoRoot `
+            -Verb RunAs `
+            -Wait `
+            -PassThru
+    } finally {
+        [Environment]::SetEnvironmentVariable("NGROK_AUTHTOKEN", $PreviousToken, "Process")
+    }
     exit $Child.ExitCode
 }
 
@@ -115,7 +120,7 @@ try {
         -IUnderstand:$IUnderstand | ConvertFrom-Json
     $Report.gateway = $Gateway
 
-    $Diagnostics = & (Join-Path $PSScriptRoot "diagnose.ps1") -TestScreen | ConvertFrom-Json
+    $Diagnostics = & (Join-Path $PSScriptRoot "diagnose.ps1") -TestScreen -TestNetwork | ConvertFrom-Json
     $Report.diagnostics = $Diagnostics
     $SelfTest = & (Join-Path $PSScriptRoot "self-test.ps1") | ConvertFrom-Json
     $Report.self_test = $SelfTest
@@ -159,7 +164,7 @@ try {
         $Report.tunnel_supervisor = & (Join-Path $PSScriptRoot "start-tunnel-supervisor.ps1") @SupervisorArguments | ConvertFrom-Json
     }
 
-    $Status = & (Join-Path $PSScriptRoot "status.ps1") | ConvertFrom-Json
+    $Status = & (Join-Path $PSScriptRoot "status.ps1") -IncludeNetworkProfile | ConvertFrom-Json
     $Report.status = $Status
     $Report.ok = $true
 } catch {
