@@ -11,7 +11,7 @@ $StateDir = Join-Path $env:LOCALAPPDATA "DesktopMCPBridge"
 $Results = [ordered]@{}
 $Results.repo_root = $RepoRoot
 $Results.windows = [Environment]::OSVersion.VersionString
-$Results.administrator = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+$Results.caller_administrator = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 $Results.python = if (Test-Path $Python) { (& $Python --version 2>&1 | Out-String).Trim() } else { "missing" }
 $Results.port_8766_in_use = [bool](Get-NetTCPConnection -LocalPort 8766 -ErrorAction SilentlyContinue)
 $Results.kill_switch_active = Test-Path (Join-Path $StateDir "STOP")
@@ -53,11 +53,13 @@ if (Test-Path $TunnelStatePath) {
 }
 
 if (Test-Path $Python) {
-    & $Python -c "from desktop_mcp_bridge.config import BridgeSettings; from desktop_mcp_bridge.action_api import app; from desktop_mcp_bridge.server import mcp; s=app.openapi(); assert '/v1/act' in s['paths']; print('imports/openapi: ok')"
+    $ImportOutput = @(& $Python -c "from desktop_mcp_bridge.config import BridgeSettings; from desktop_mcp_bridge.action_api import app; from desktop_mcp_bridge.server import mcp; s=app.openapi(); assert '/v1/act' in s['paths']; print('imports/openapi: ok')" 2>&1)
     $Results.imports_openapi = $LASTEXITCODE -eq 0
+    $Results.imports_openapi_output = ($ImportOutput | Out-String).Trim()
     if ($TestScreen -and -not $Quick) {
-        & $Python -c "from pathlib import Path; from desktop_mcp_bridge.config import BridgeSettings; from desktop_mcp_bridge.runtime import DesktopBridge; b=DesktopBridge(BridgeSettings(allowed_roots=[Path.cwd()])); data,meta=b.observe_desktop_bytes(); print(meta); b.close(); assert len(data)>1000"
+        $ScreenOutput = @(& $Python -c "from pathlib import Path; from desktop_mcp_bridge.config import BridgeSettings; from desktop_mcp_bridge.runtime import DesktopBridge; b=DesktopBridge(BridgeSettings(allowed_roots=[Path.cwd()])); data,meta=b.observe_desktop_bytes(); print(meta); b.close(); assert len(data)>1000" 2>&1)
         $Results.screen_capture = $LASTEXITCODE -eq 0
+        $Results.screen_capture_output = ($ScreenOutput | Out-String).Trim()
     }
 }
 if ($TestNetwork -and -not $Quick) {
