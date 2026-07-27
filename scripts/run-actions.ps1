@@ -35,7 +35,7 @@ $Roots = @()
 foreach ($Root in $AllowedRoot) {
     $Roots += ((Resolve-Path $Root).Path -replace '\\', '/')
 }
-$env:DMB_ALLOWED_ROOTS = ($Roots | ConvertTo-Json -Compress)
+$env:DMB_ALLOWED_ROOTS = ConvertTo-Json -InputObject @($Roots) -Compress
 $env:DMB_ACCESS_PROFILE = $Profile
 $env:DMB_ACTION_HOST = "127.0.0.1"
 $env:DMB_ACTION_PORT = "$Port"
@@ -56,7 +56,7 @@ if ($Profile -eq "full") {
 
 $BrowserChannel = $env:DMB_BROWSER_CHANNEL
 if ([string]::IsNullOrWhiteSpace($BrowserChannel)) { $BrowserChannel = "auto" }
-Write-Host "Desktop Action Gateway v1.1 starting on 127.0.0.1:$Port" -ForegroundColor Cyan
+Write-Host "Desktop Action Gateway v1.2 starting on 127.0.0.1:$Port" -ForegroundColor Cyan
 Write-Host "Profile: $Profile | Approval policy: $env:DMB_APPROVAL_POLICY" -ForegroundColor Cyan
 Write-Host "Browser channel: $BrowserChannel" -ForegroundColor DarkGray
 Write-Host "Keep this window open. Use the STOP-file kill switch for emergency shutdown of mutations." -ForegroundColor Yellow
