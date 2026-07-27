@@ -34,10 +34,41 @@ if (-not $SkipOCR) {
     $Results.ocr = Invoke-Observe "screen_ocr" @{ monitor = 1; language = "eng+fas"; include_image = $false; min_confidence = 20 }
 }
 if (-not $SkipBrowser) {
+    $ExpectedTitle = "Desktop MCP Bridge Self Test"
+    $Html = '<!doctype html><html><head><meta charset="utf-8"><title>Desktop MCP Bridge Self Test</title></head><body><main><h1>Desktop MCP Bridge Browser Ready</h1><button type="button">Self Test Button</button></main></body></html>'
+    $DataUrl = "data:text/html;charset=utf-8,$([uri]::EscapeDataString($Html))"
+
     $Results.browser_start = Invoke-Act "browser_start" @{ headless = $false }
-    $Results.browser_navigate = Invoke-Act "browser_navigate" @{ url = "https://example.com"; wait_until = "domcontentloaded"; timeout_seconds = 30 }
-    $Results.browser_snapshot = Invoke-Observe "browser_snapshot" @{ max_chars = 20000 }
-    if ($Results.browser_snapshot.result.title -notmatch "Example") { throw "Browser snapshot did not reach example.com." }
+    $Results.browser_test_tab = Invoke-Act "browser_tabs" @{ tab_operation = "new" }
+    $Results.browser_navigate = Invoke-Act "browser_navigate" @{ url = $DataUrl; wait_until = "domcontentloaded"; timeout_seconds = 30 }
+
+    $BrowserReady = $false
+    for ($Attempt = 1; $Attempt -le 10; $Attempt++) {
+        $Results.browser_snapshot = Invoke-Observe "browser_snapshot" @{ max_chars = 20000 }
+        $Snapshot = $Results.browser_snapshot.result
+        if (
+            $Snapshot.title -eq $ExpectedTitle -and
+            $Snapshot.url -like "data:text/html*"
+        ) {
+            $BrowserReady = $true
+            break
+        }
+        Start-Sleep -Milliseconds 500
+    }
+
+    if (-not $BrowserReady) {
+        $Navigate = $Results.browser_navigate.result
+        $Snapshot = $Results.browser_snapshot.result
+        $Backend = $Results.browser_start.result.backend
+        throw (
+            "Browser self-test did not reach its isolated local page. " +
+            "navigate_url='$($Navigate.url)', navigate_title='$($Navigate.title)', " +
+            "snapshot_url='$($Snapshot.url)', snapshot_title='$($Snapshot.title)', " +
+            "backend='$($Backend.label)'."
+        )
+    }
+
+    $Results.browser_close_test_tab = Invoke-Act "browser_tabs" @{ tab_operation = "close" }
 }
 
 $Job = Invoke-Act "start_command_job" @{ command = "cmd /d /c echo Desktop-MCP-Bridge-Self-Test" } -Confirm
