@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 
 from platformdirs import user_state_dir
 from pydantic import BaseModel, Field, field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 FULL_ACCESS_CONFIRMATION = "I UNDERSTAND THIS GRANTS FULL CONTROL"
 
@@ -39,7 +40,9 @@ class BridgeSettings(BaseSettings):
 
     access_profile: Literal["safe", "developer", "full"] = "safe"
     full_access_confirmation: str = ""
-    allowed_roots: list[Path] = Field(default_factory=lambda: [Path.cwd()])
+    allowed_roots: Annotated[list[Path], NoDecode] = Field(
+        default_factory=lambda: [Path.cwd()]
+    )
 
     max_read_bytes: int = Field(default=10_000_000, ge=1_024, le=500_000_000)
     max_write_bytes: int = Field(default=10_000_000, ge=1_024, le=500_000_000)
@@ -125,9 +128,37 @@ class BridgeSettings(BaseSettings):
         ]
     )
 
+    @field_validator("allowed_roots", mode="before")
+    @classmethod
+    def parse_allowed_roots(cls, value: object) -> object:
+        """Accept JSON arrays and legacy single-path environment values."""
+        if isinstance(value, Path):
+            return [value]
+        if isinstance(value, (tuple, set)):
+            return list(value)
+        if not isinstance(value, str):
+            return value
+
+        text = value.strip()
+        if not text:
+            return [Path.cwd()]
+
+        try:
+            decoded = json.loads(text)
+        except json.JSONDecodeError:
+            decoded = None
+
+        if isinstance(decoded, list):
+            return decoded
+        if isinstance(decoded, str):
+            return [decoded]
+        return [text]
+
     @field_validator("allowed_roots", mode="after")
     @classmethod
     def normalize_roots(cls, roots: list[Path]) -> list[Path]:
+        if not roots:
+            raise ValueError("allowed_roots must contain at least one path")
         return [root.expanduser().resolve() for root in roots]
 
     @field_validator("tessdata_dir", "browser_executable_path", mode="after")
