@@ -39,6 +39,19 @@ jobs:
             }
           }
           if ($Failed) { exit 1 }
+      - name: Validate allowed-root environment compatibility
+        shell: pwsh
+        run: |
+          $Roots = @("C:/AI/Desktop-MCP-Bridge")
+          $Json = ConvertTo-Json -InputObject @($Roots) -Compress
+          if ($Json -ne '["C:/AI/Desktop-MCP-Bridge"]') {
+            throw "A single PowerShell root was not serialized as a JSON array: $Json"
+          }
+          $env:DMB_ALLOWED_ROOTS = $Json
+          python -c "from desktop_mcp_bridge.config import BridgeSettings; s=BridgeSettings(); assert len(s.allowed_roots) == 1; print(s.allowed_roots)"
+          $env:DMB_ALLOWED_ROOTS = "C:/AI/Desktop-MCP-Bridge"
+          python -c "from desktop_mcp_bridge.config import BridgeSettings; s=BridgeSettings(); assert len(s.allowed_roots) == 1; print(s.allowed_roots)"
+          Remove-Item Env:DMB_ALLOWED_ROOTS -ErrorAction SilentlyContinue
       - name: Validate machine-readable diagnostics
         id: diagnostics
         shell: pwsh
