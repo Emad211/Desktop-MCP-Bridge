@@ -19,7 +19,7 @@ $Roots = @()
 foreach ($Root in $AllowedRoot) {
     $Roots += ((Resolve-Path $Root).Path -replace '\\', '/')
 }
-$env:DMB_ALLOWED_ROOTS = ($Roots | ConvertTo-Json -Compress)
+$env:DMB_ALLOWED_ROOTS = ConvertTo-Json -InputObject @($Roots) -Compress
 $env:DMB_ACCESS_PROFILE = $Profile
 $env:DMB_TRANSPORT = $Transport
 $env:DMB_HOST = "127.0.0.1"
