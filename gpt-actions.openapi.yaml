@@ -1,0 +1,172 @@
+openapi: 3.1.0
+info:
+  title: Desktop MCP Bridge Private Action Gateway
+  version: 1.2.0
+  description: >-
+    Private, self-hosted Windows desktop agent with structured desktop, browser, OCR,
+    filesystem, terminal, process, UI Automation, registry, service, package, network,
+    scheduled-task, and power controls.
+servers:
+  - url: https://YOUR_PUBLIC_HTTPS_HOST
+paths:
+  /health:
+    get:
+      operationId: healthCheck
+      summary: Check whether the local desktop bridge is online.
+      x-openai-isConsequential: false
+      responses:
+        "200":
+          description: Gateway status.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+  /v1/observe:
+    post:
+      operationId: observeComputer
+      summary: Observe the desktop, browser, files, jobs, processes, registry, or audit log.
+      x-openai-isConsequential: false
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ObserveRequest"
+      responses:
+        "200":
+          description: Structured observation result. Artifact results include a short-lived URL.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+  /v1/act:
+    post:
+      operationId: controlComputer
+      summary: Perform one idempotent state-changing operation on the Windows computer.
+      x-openai-isConsequential: true
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ActRequest"
+      responses:
+        "200":
+          description: Operation result.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "409":
+          description: Confirmation required or request_id conflict.
+  /v1/screenshot:
+    get:
+      operationId: getScreenCapture
+      summary: Download the current desktop screenshot as a PNG file.
+      x-openai-isConsequential: false
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: monitor
+          schema: {type: integer, default: 1}
+        - in: query
+          name: max_width
+          schema: {type: integer, default: 1920, minimum: 320, maximum: 7680}
+      responses:
+        "200":
+          description: Current screenshot.
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+  schemas:
+    ObserveRequest:
+      type: object
+      required: [operation]
+      properties:
+        operation:
+          type: string
+          enum:
+            - status
+            - system_info
+            - capture_desktop_artifact
+            - screen_ocr
+            - list_directory
+            - read_text_file
+            - read_binary_file
+            - get_command_job
+            - list_command_jobs
+            - list_processes
+            - clipboard_read
+            - list_windows
+            - uia_tree
+            - browser_status
+            - browser_snapshot
+            - browser_screenshot
+            - registry_get
+            - audit_tail
+        arguments:
+          type: object
+          additionalProperties: true
+          default: {}
+    ActRequest:
+      type: object
+      required: [operation, request_id]
+      properties:
+        operation:
+          type: string
+          enum:
+            - desktop_step
+            - write_text_file
+            - write_binary_file
+            - copy_path
+            - move_path
+            - delete_path
+            - run_command
+            - start_command_job
+            - cancel_command_job
+            - stop_process
+            - clipboard_write
+            - window_control
+            - uia_invoke
+            - browser_start
+            - browser_navigate
+            - browser_interact
+            - browser_tabs
+            - browser_upload
+            - browser_download
+            - browser_evaluate
+            - browser_close
+            - registry_set
+            - registry_delete
+            - service_control
+            - package_manage
+            - network_admin
+            - scheduled_task_control
+            - power_control
+        arguments:
+          type: object
+          additionalProperties: true
+          default: {}
+        request_id:
+          type: string
+          minLength: 8
+          maxLength: 100
+          description: A new unique ID for the logical action. Reuse it only when retrying the exact same action.
+        confirmation:
+          type: [string, "null"]
+          description: In guarded mode, high-risk operations require CONFIRM:<operation>.

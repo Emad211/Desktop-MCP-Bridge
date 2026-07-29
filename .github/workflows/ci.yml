@@ -1,0 +1,134 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "feat/**", "build/**", "staging/**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -e ".[dev]"
+      - run: python -m compileall -q src
+      - name: Parse PowerShell scripts
+        shell: pwsh
+        run: |
+          $Failed = $false
+          Get-ChildItem scripts -Filter *.ps1 -Recurse | ForEach-Object {
+            $Tokens = $null
+            $Errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$Tokens, [ref]$Errors)
+            if ($Errors.Count -gt 0) {
+              $Failed = $true
+              Write-Host "PowerShell parse errors in $($_.FullName)" -ForegroundColor Red
+              $Errors | Format-List | Out-String | Write-Host
+            }
+          }
+          if ($Failed) { exit 1 }
+      - name: Validate allowed-root environment compatibility
+        shell: pwsh
+        run: |
+          $Roots = @("C:/AI/Desktop-MCP-Bridge")
+          $Json = ConvertTo-Json -InputObject @($Roots) -Compress
+          if ($Json -ne '["C:/AI/Desktop-MCP-Bridge"]') {
+            throw "A single PowerShell root was not serialized as a JSON array: $Json"
+          }
+          $env:DMB_ALLOWED_ROOTS = $Json
+          python -c "from desktop_mcp_bridge.config import BridgeSettings; s=BridgeSettings(); assert len(s.allowed_roots) == 1; print(s.allowed_roots)"
+          $env:DMB_ALLOWED_ROOTS = "C:/AI/Desktop-MCP-Bridge"
+          python -c "from desktop_mcp_bridge.config import BridgeSettings; s=BridgeSettings(); assert len(s.allowed_roots) == 1; print(s.allowed_roots)"
+          Remove-Item Env:DMB_ALLOWED_ROOTS -ErrorAction SilentlyContinue
+      - name: Validate machine-readable diagnostics
+        id: diagnostics
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          try {
+            $Raw = .\scripts\diagnose.ps1 -Quick
+            $Raw | Set-Content -Path diagnostics-output.txt -Encoding UTF8
+            $Diagnostics = $Raw | ConvertFrom-Json
+            if ($Diagnostics.imports_openapi -ne $true) { throw "Diagnostics import/OpenAPI check failed." }
+            if ($Diagnostics.imports_openapi_output -notmatch "imports/openapi: ok") { throw "Diagnostics captured no import output." }
+            $Diagnostics | ConvertTo-Json -Depth 8
+          } catch {
+            $_ | Format-List * -Force | Out-String | Tee-Object -FilePath diagnostics-error.txt
+            exit 1
+          }
+      - name: Upload diagnostics output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: diagnostics-${{ matrix.python-version }}
+          path: |
+            diagnostics-output.txt
+            diagnostics-error.txt
+          if-no-files-found: ignore
+      - name: Fail if diagnostics failed
+        if: steps.diagnostics.outcome == 'failure'
+        shell: pwsh
+        run: exit 1
+      - name: Validate Windows network detector
+        id: network_detector
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          try {
+            $Raw = .\scripts\get-network-profile.ps1 -TimeoutSeconds 2 -PortProbeTimeoutMilliseconds 100
+            $Raw | Set-Content -Path network-detector-output.txt -Encoding UTF8
+            $Profile = $Raw | ConvertFrom-Json
+            if (-not $Profile.detected_at) { throw "Network detector returned no timestamp." }
+            if (-not $Profile.recommended_mode) { throw "Network detector returned no recommendation." }
+            $Profile | ConvertTo-Json -Depth 8
+          } catch {
+            $_ | Format-List * -Force | Out-String | Tee-Object -FilePath network-detector-error.txt
+            exit 1
+          }
+      - name: Upload network detector output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: network-detector-${{ matrix.python-version }}
+          path: |
+            network-detector-output.txt
+            network-detector-error.txt
+          if-no-files-found: ignore
+      - name: Fail if network detector failed
+        if: steps.network_detector.outcome == 'failure'
+        shell: pwsh
+        run: exit 1
+      - name: Ruff
+        id: ruff
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          python -m ruff check . --output-format=concise 2>&1 | Tee-Object -FilePath ruff-output.txt
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Upload Ruff output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ruff-${{ matrix.python-version }}
+          path: ruff-output.txt
+      - name: Fail if Ruff failed
+        if: steps.ruff.outcome == 'failure'
+        shell: pwsh
+        run: exit 1
+      - run: python -m pytest --cov=desktop_mcp_bridge --cov-report=term-missing
+      - name: Validate imports and Action OpenAPI generation
+        shell: pwsh
+        run: |
+          python -c "from desktop_mcp_bridge import __version__; from desktop_mcp_bridge.server import mcp; from desktop_mcp_bridge.action_api import app; s=app.openapi(); assert __version__ == '1.2.0'; assert s['openapi'].startswith('3.'); assert '/v1/act' in s['paths']; assert '/v1/screenshot' in s['paths']; print(s['openapi'], mcp.name, __version__)"
