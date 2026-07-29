@@ -4,7 +4,9 @@ param(
 )
 
 $env:PLAYWRIGHT_BROWSERS_PATH = Join-Path $RepoRoot ".playwright-browsers"
-$env:DMB_TESSDATA_DIR = Join-Path $env:LOCALAPPDATA "DesktopMCPBridge\tessdata"
+$TessdataDir = Join-Path $env:LOCALAPPDATA "DesktopMCPBridge\tessdata"
+$env:DMB_TESSDATA_DIR = $TessdataDir
+$env:TESSDATA_PREFIX = $TessdataDir.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
 
 $BrowserStatePath = Join-Path $env:LOCALAPPDATA "DesktopMCPBridge\browser-runtime.json"
 if (Test-Path $BrowserStatePath) {
