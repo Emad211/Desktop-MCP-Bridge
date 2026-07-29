@@ -86,6 +86,12 @@ class VisionToolsMixin:
             if command is not None:
                 pytesseract.pytesseract.tesseract_cmd = str(command)
 
+            tessdata_dir = _configure_tessdata_environment(
+                self.settings.tessdata_dir,
+                command,
+                language,
+            )
+
             data, metadata = self.observe_desktop_bytes(
                 monitor=monitor,
                 max_width=max_width,
@@ -94,15 +100,14 @@ class VisionToolsMixin:
             )
             image = PILImage.open(io.BytesIO(data))
             try:
-                config = ""
-                if self.settings.tessdata_dir:
-                    config = (
-                        f'--tessdata-dir "{self.settings.tessdata_dir}"'
-                    )
+                # Do not pass --tessdata-dir through pytesseract on Windows. Its
+                # shlex handling can preserve quotes around paths containing spaces,
+                # causing Tesseract to look for '"C:\\...\\tessdata"/eng.traineddata'.
+                # TESSDATA_PREFIX is inherited safely by the subprocess instead.
                 ocr = pytesseract.image_to_data(
                     image,
                     lang=language,
-                    config=config,
+                    config="",
                     output_type=pytesseract.Output.DICT,
                 )
             except pytesseract.TesseractNotFoundError as exc:
@@ -155,6 +160,9 @@ class VisionToolsMixin:
                 "tesseract_command": (
                     None if command is None else str(command)
                 ),
+                "tessdata_dir": (
+                    None if tessdata_dir is None else str(tessdata_dir)
+                ),
                 "capture": metadata,
             }
             if include_image:
@@ -172,6 +180,61 @@ class VisionToolsMixin:
             operation,
             source=source,
         )
+
+
+def _configure_tessdata_environment(
+    configured: Path | None,
+    command: Path | None,
+    language: str,
+) -> Path | None:
+    candidates: list[Path] = []
+    if configured is not None:
+        candidates.append(configured.expanduser())
+
+    existing_prefix = os.environ.get("TESSDATA_PREFIX", "").strip().strip('"')
+    if existing_prefix:
+        candidates.append(Path(existing_prefix).expanduser())
+
+    if command is not None:
+        candidates.append(command.parent / "tessdata")
+
+    selected: Path | None = None
+    for candidate in candidates:
+        try:
+            resolved = candidate.resolve()
+        except OSError:
+            continue
+        if resolved.is_dir():
+            selected = resolved
+            break
+
+    if selected is None:
+        if configured is not None:
+            raise RuntimeError(
+                f"Configured tessdata directory does not exist: {configured}"
+            )
+        return None
+
+    requested_languages = [
+        item.strip()
+        for item in language.replace(",", "+").split("+")
+        if item.strip()
+    ]
+    missing = [
+        item
+        for item in requested_languages
+        if not (selected / f"{item}.traineddata").is_file()
+    ]
+    if missing:
+        raise RuntimeError(
+            "Tesseract language data is missing from "
+            f"{selected}: {', '.join(missing)}"
+        )
+
+    # A trailing separator is intentional. It works with Tesseract versions
+    # that concatenate TESSDATA_PREFIX directly with the traineddata filename.
+    os.environ["TESSDATA_PREFIX"] = str(selected) + os.sep
+    return selected
 
 
 def _find_tesseract(configured: str) -> Path | None:
