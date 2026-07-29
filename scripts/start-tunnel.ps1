@@ -13,6 +13,8 @@ param(
 
 $ErrorActionPreference = "Stop"
 $Attempts = New-Object System.Collections.Generic.List[object]
+$StateDir = Join-Path $env:LOCALAPPDATA "DesktopMCPBridge"
+$GatewayTaskName = "Desktop MCP Bridge Action Gateway"
 
 function Get-SafeProxyUrl {
     param([string]$Value)
@@ -24,6 +26,74 @@ function Get-SafeProxyUrl {
         }
     } catch {}
     return $Value
+}
+
+function Test-LocalGatewayHealth {
+    try {
+        $Health = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/health" -TimeoutSec 3
+        return $Health.ok -eq $true
+    } catch {
+        return $false
+    }
+}
+
+function Ensure-LocalGatewayHealthy {
+    if (Test-LocalGatewayHealth) {
+        return [ordered]@{
+            healthy = $true
+            recovered = $false
+            recovery_method = "already-running"
+            task_last_result = $null
+        }
+    }
+
+    $Task = Get-ScheduledTask -TaskName $GatewayTaskName -ErrorAction SilentlyContinue
+    if (-not $Task) {
+        throw "The local Action Gateway is not healthy on 127.0.0.1:$Port and the recovery Scheduled Task '$GatewayTaskName' is not installed."
+    }
+
+    $Action = @($Task.Actions)[0]
+    $Arguments = [string]$Action.Arguments
+    if (
+        [string]$Action.Execute -notmatch "(?i)powershell" -or
+        $Arguments -notmatch "(?i)start-gateway\.ps1" -or
+        $Arguments -notmatch "(?i)-RequireAdministrator" -or
+        $Arguments -notmatch "(?i)-FullAccess" -or
+        $Arguments -notmatch "(?i)-Autonomous"
+    ) {
+        throw "The Gateway recovery Scheduled Task exists but is not the verified Full/Autonomous start-gateway task. Refusing automatic recovery."
+    }
+
+    if ([string]$Task.State -eq "Running") {
+        Stop-ScheduledTask -TaskName $GatewayTaskName -ErrorAction SilentlyContinue
+        Start-Sleep -Seconds 2
+    }
+    Start-ScheduledTask -TaskName $GatewayTaskName -ErrorAction Stop
+
+    $Deadline = (Get-Date).AddSeconds(90)
+    do {
+        Start-Sleep -Seconds 2
+        if (Test-LocalGatewayHealth) {
+            $TaskInfo = Get-ScheduledTaskInfo -TaskName $GatewayTaskName -ErrorAction SilentlyContinue
+            return [ordered]@{
+                healthy = $true
+                recovered = $true
+                recovery_method = "scheduled-task"
+                task_last_result = if ($TaskInfo) { $TaskInfo.LastTaskResult } else { $null }
+            }
+        }
+    } while ((Get-Date) -lt $Deadline)
+
+    $TaskInfo = Get-ScheduledTaskInfo -TaskName $GatewayTaskName -ErrorAction SilentlyContinue
+    $StdoutPath = Join-Path $StateDir "gateway.stdout.log"
+    $StderrPath = Join-Path $StateDir "gateway.stderr.log"
+    $StdoutTail = if (Test-Path $StdoutPath) { (Get-Content $StdoutPath -Tail 80 | Out-String).Trim() } else { "" }
+    $StderrTail = if (Test-Path $StderrPath) { (Get-Content $StderrPath -Tail 80 | Out-String).Trim() } else { "" }
+    $LastResult = if ($TaskInfo) { $TaskInfo.LastTaskResult } else { $null }
+    throw (
+        "The local Action Gateway could not be recovered on 127.0.0.1:$Port within 90 seconds. " +
+        "ScheduledTask LastTaskResult=$LastResult. stdout_tail='$StdoutTail'. stderr_tail='$StderrTail'."
+    )
 }
 
 function Test-NgrokConfigured {
@@ -51,12 +121,7 @@ function Test-TailscaleReady {
     }
 }
 
-try {
-    $LocalHealth = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/health" -TimeoutSec 3
-    if ($LocalHealth.ok -ne $true) { throw "Local gateway health returned ok=false." }
-} catch {
-    throw "The local Action Gateway is not healthy on 127.0.0.1:$Port."
-}
+$GatewayRecovery = Ensure-LocalGatewayHealthy
 
 if ($Restart) {
     & (Join-Path $PSScriptRoot "stop-tunnel.ps1") | Out-Null
@@ -133,7 +198,7 @@ foreach ($CandidateProvider in $ProviderOrder) {
             }
             if (-not $Result.url) { throw "Provider returned no public URL." }
             & (Join-Path $PSScriptRoot "test-public-endpoint.ps1") -PublicBaseUrl $Result.url | Out-Null
-            $StatePath = Join-Path $env:LOCALAPPDATA "DesktopMCPBridge\tunnel.json"
+            $StatePath = Join-Path $StateDir "tunnel.json"
             $State = [ordered]@{
                 provider = $Result.provider
                 pid = $Result.pid
@@ -147,6 +212,7 @@ foreach ($CandidateProvider in $ProviderOrder) {
                 started_at = (Get-Date).ToUniversalTime().ToString("o")
                 provider_state = $Result
                 network_profile = $Network
+                gateway_recovery = $GatewayRecovery
                 provider_availability = @{
                     ngrok_configured = $NgrokReady
                     tailscale_running = $TailscaleReady
