@@ -10,6 +10,6 @@ def test_superassistant_proxy_uses_hidden_direct_node_launcher() -> None:
     assert "-WindowStyle Hidden" in script
     assert 'launch_method = "direct-node-hidden"' in script
     assert "superassistant-runtime" in script
-    assert "npm install" in script
+    assert "& $Npm install" in script
     assert "Start-Process -FilePath $Npx" not in script
     assert "-WindowStyle Minimized" not in script
