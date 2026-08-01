@@ -20,6 +20,8 @@ New-Item -ItemType Directory -Path $StateDir, $RuntimeDir -Force | Out-Null
 $StatePath = Join-Path $StateDir "superassistant-proxy.json"
 $OutLog = Join-Path $StateDir "superassistant-proxy.stdout.log"
 $ErrLog = Join-Path $StateDir "superassistant-proxy.stderr.log"
+$InstallOutLog = Join-Path $StateDir "superassistant-runtime-install.stdout.log"
+$InstallErrLog = Join-Path $StateDir "superassistant-runtime-install.stderr.log"
 
 function Get-CommandPath {
     param([string[]]$Names)
@@ -220,17 +222,31 @@ try {
         if (-not (Test-Path $PackageJsonPath)) {
             '{"private":true}' | Set-Content -Path $PackageJsonPath -Encoding UTF8
         }
-        & $Npm install `
-            --prefix $RuntimeDir `
-            --save-exact `
-            --omit=dev `
-            --no-package-lock `
-            --no-audit `
-            --no-fund `
+        Remove-Item $InstallOutLog, $InstallErrLog -Force -ErrorAction SilentlyContinue
+        $InstallArguments = @(
+            "install",
+            "--prefix", ('"{0}"' -f $RuntimeDir),
+            "--save-exact",
+            "--omit=dev",
+            "--no-package-lock",
+            "--no-audit",
+            "--no-fund",
             $Package
-        if ($LASTEXITCODE -ne 0) {
-            throw "Installing the pinned proxy runtime failed with exit code $LASTEXITCODE."
+        )
+        $NpmInstall = Start-Process -FilePath $Npm `
+            -ArgumentList ($InstallArguments -join " ") `
+            -WorkingDirectory $RuntimeDir `
+            -WindowStyle Hidden `
+            -RedirectStandardOutput $InstallOutLog `
+            -RedirectStandardError $InstallErrLog `
+            -Wait `
+            -PassThru
+        if ($NpmInstall.ExitCode -ne 0) {
+            $InstallStdout = if (Test-Path $InstallOutLog) { Get-Content $InstallOutLog -Raw } else { "" }
+            $InstallStderr = if (Test-Path $InstallErrLog) { Get-Content $InstallErrLog -Raw } else { "" }
+            throw "Installing the pinned proxy runtime failed with exit code $($NpmInstall.ExitCode). stdout='$InstallStdout' stderr='$InstallStderr'"
         }
+        Write-Host "Pinned proxy runtime installed successfully." -ForegroundColor DarkCyan
     } else {
         Write-Host "Reusing cached SuperAssistant proxy runtime $InstalledVersion." -ForegroundColor DarkCyan
     }
@@ -317,9 +333,8 @@ $State = [ordered]@{
     config_path = $ConfigPath
     stdout_log = $OutLog
     stderr_log = $ErrLog
-    network_mode = $NetworkPlan.resolved_mode
-    selected_proxy = $NetworkPlan.selected_proxy
-    local_bypass = $NetworkPlan.local_bypass
+    runtime_install_stdout_log = $InstallOutLog
+    runtime_install_stderr_log = $InstallErrLog
     started_at = (Get-Date).ToUniversalTime().ToString("o")
 }
 $State | ConvertTo-Json -Depth 10 | Set-Content -Path $StatePath -Encoding UTF8
