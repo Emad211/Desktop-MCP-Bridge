@@ -1,7 +1,7 @@
 param(
     [int]$Port = 3006,
     [string]$StatePath = (Join-Path $env:LOCALAPPDATA "DesktopMCPBridge\superassistant-proxy.json"),
-    [int]$WaitSeconds = 15
+    [int]$WaitSeconds = 30
 )
 
 $ErrorActionPreference = "Stop"
@@ -11,67 +11,160 @@ if (Test-Path $StatePath) {
 }
 
 $Attempts = New-Object System.Collections.Generic.List[object]
-function Stop-RecordedProcess {
-    param(
-        [int]$ProcessId,
-        [string]$ExpectedStartedAt,
-        [string]$Role
-    )
-    if (-not $ProcessId -or $ProcessId -eq $PID) { return }
+
+function Get-ProcessStartTime {
+    param([int]$ProcessId)
     $Process = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
-    if (-not $Process) { return }
-    $ActualStartedAt = $Process.StartTime.ToUniversalTime().ToString("o")
-    if ($ExpectedStartedAt -and $ActualStartedAt -ne $ExpectedStartedAt) {
-        $Attempts.Add([pscustomobject]@{
-            role = $Role
-            process_id = $ProcessId
-            stopped = $false
-            reason = "process-start-time-mismatch"
-        })
-        return
-    }
-    $Output = @(& taskkill.exe /PID $ProcessId /T /F 2>&1)
+    if (-not $Process) { return $null }
+    try { return $Process.StartTime.ToUniversalTime().ToString("o") } catch { return $null }
+}
+
+function Test-ExpectedIdentity {
+    param([int]$ProcessId, [string[]]$ExpectedStartedAt)
+    $Actual = Get-ProcessStartTime -ProcessId $ProcessId
+    if (-not $Actual) { return $false }
+    $Expected = @($ExpectedStartedAt | Where-Object { $_ })
+    if ($Expected.Count -eq 0) { return $true }
+    return $Expected -contains $Actual
+}
+
+function Add-StopAttempt {
+    param(
+        [string]$Method,
+        [int]$ProcessId,
+        [string]$Role,
+        [bool]$Succeeded,
+        [int]$ExitCode = 0,
+        [string]$Output = ""
+    )
     $Attempts.Add([pscustomobject]@{
+        method = $Method
         role = $Role
         process_id = $ProcessId
-        stopped = ($LASTEXITCODE -eq 0)
-        exit_code = $LASTEXITCODE
-        output = ($Output | Out-String).Trim()
+        succeeded = $Succeeded
+        exit_code = $ExitCode
+        output = $Output
     })
 }
 
+function Stop-OwnedProcessTree {
+    param(
+        [int]$ProcessId,
+        [string[]]$ExpectedStartedAt,
+        [string]$Role
+    )
+    if (-not $ProcessId -or $ProcessId -eq $PID) { return }
+    if (-not (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue)) { return }
+    if (-not (Test-ExpectedIdentity -ProcessId $ProcessId -ExpectedStartedAt $ExpectedStartedAt)) {
+        Add-StopAttempt `
+            -Method "identity-check" `
+            -ProcessId $ProcessId `
+            -Role $Role `
+            -Succeeded $false `
+            -Output "process-start-time-mismatch"
+        return
+    }
+
+    $TaskkillOutput = @(& taskkill.exe /PID $ProcessId /T /F 2>&1)
+    $TaskkillExit = $LASTEXITCODE
+    Add-StopAttempt `
+        -Method "taskkill-tree-force" `
+        -ProcessId $ProcessId `
+        -Role $Role `
+        -Succeeded ($TaskkillExit -eq 0) `
+        -ExitCode $TaskkillExit `
+        -Output (($TaskkillOutput | Out-String).Trim())
+
+    try { Wait-Process -Id $ProcessId -Timeout 8 -ErrorAction SilentlyContinue } catch {}
+    if (-not (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue)) { return }
+
+    try {
+        Stop-Process -Id $ProcessId -Force -ErrorAction Stop
+        Add-StopAttempt -Method "stop-process-force" -ProcessId $ProcessId -Role $Role -Succeeded $true
+    } catch {
+        Add-StopAttempt `
+            -Method "stop-process-force" `
+            -ProcessId $ProcessId `
+            -Role $Role `
+            -Succeeded $false `
+            -Output $_.Exception.Message
+    }
+    try { Wait-Process -Id $ProcessId -Timeout 5 -ErrorAction SilentlyContinue } catch {}
+    if (-not (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue)) { return }
+
+    try {
+        $CimProcess = Get-CimInstance Win32_Process -Filter "ProcessId=$ProcessId" -ErrorAction Stop
+        $Termination = Invoke-CimMethod -InputObject $CimProcess -MethodName Terminate -ErrorAction Stop
+        Add-StopAttempt `
+            -Method "cim-terminate" `
+            -ProcessId $ProcessId `
+            -Role $Role `
+            -Succeeded ($Termination.ReturnValue -eq 0) `
+            -ExitCode ([int]$Termination.ReturnValue)
+    } catch {
+        Add-StopAttempt `
+            -Method "cim-terminate" `
+            -ProcessId $ProcessId `
+            -Role $Role `
+            -Succeeded $false `
+            -Output $_.Exception.Message
+    }
+}
+
 if ($State) {
-    Stop-RecordedProcess `
-        -ProcessId ([int]$State.launcher_pid) `
-        -ExpectedStartedAt ([string]$State.launcher_started_at) `
-        -Role "launcher"
-    Stop-RecordedProcess `
-        -ProcessId ([int]$State.listener_pid) `
-        -ExpectedStartedAt ([string]$State.listener_started_at) `
-        -Role "listener"
+    $TargetRows = New-Object System.Collections.Generic.List[object]
+    if ($State.listener_pid) {
+        $TargetRows.Add([pscustomobject]@{
+            process_id = [int]$State.listener_pid
+            role = "listener"
+            expected_started_at = [string]$State.listener_started_at
+        })
+    }
+    if ($State.launcher_pid) {
+        $TargetRows.Add([pscustomobject]@{
+            process_id = [int]$State.launcher_pid
+            role = "launcher"
+            expected_started_at = [string]$State.launcher_started_at
+        })
+    }
+
+    foreach ($Group in @($TargetRows | Group-Object process_id)) {
+        $ProcessId = [int]$Group.Name
+        $Roles = @($Group.Group | Select-Object -ExpandProperty role -Unique)
+        $Expected = @($Group.Group | Select-Object -ExpandProperty expected_started_at -Unique)
+        Stop-OwnedProcessTree `
+            -ProcessId $ProcessId `
+            -ExpectedStartedAt $Expected `
+            -Role ($Roles -join "+")
+    }
 }
 
 $Deadline = (Get-Date).AddSeconds([Math]::Max(1, $WaitSeconds))
 do {
     Start-Sleep -Milliseconds 250
     $Listeners = @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)
-    $RecordedStillListening = $false
-    if ($State -and $State.listener_pid) {
-        $RecordedStillListening = @($Listeners | Where-Object {
-            [int]$_.OwningProcess -eq [int]$State.listener_pid
-        }).Count -gt 0
+    $OwnedListeners = @()
+    foreach ($Listener in $Listeners) {
+        $ListenerPid = [int]$Listener.OwningProcess
+        $RecordedPids = @()
+        if ($State -and $State.listener_pid) { $RecordedPids += [int]$State.listener_pid }
+        if ($State -and $State.launcher_pid) { $RecordedPids += [int]$State.launcher_pid }
+        if ($RecordedPids -contains $ListenerPid) { $OwnedListeners += $ListenerPid }
     }
-    if (-not $RecordedStillListening) { break }
+    if ($OwnedListeners.Count -eq 0) { break }
 } while ((Get-Date) -lt $Deadline)
 
 $Remaining = @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)
 $RemainingPids = @($Remaining | Select-Object -ExpandProperty OwningProcess -Unique)
-$OwnedRemaining = @()
-if ($State -and $State.listener_pid -and ($RemainingPids -contains [int]$State.listener_pid)) {
-    $OwnedRemaining += [int]$State.listener_pid
-}
+$RecordedPids = @()
+if ($State -and $State.listener_pid) { $RecordedPids += [int]$State.listener_pid }
+if ($State -and $State.launcher_pid) { $RecordedPids += [int]$State.launcher_pid }
+$RecordedPids = @($RecordedPids | Select-Object -Unique)
+$OwnedRemaining = @($RemainingPids | Where-Object { $RecordedPids -contains [int]$_ })
+
 if ($OwnedRemaining.Count -gt 0) {
-    throw "The recorded SuperAssistant listener is still active on port $Port. PID: $($OwnedRemaining -join ', ')"
+    $AttemptJson = @($Attempts.ToArray()) | ConvertTo-Json -Depth 10 -Compress
+    throw "The recorded SuperAssistant listener is still active on port $Port. PID: $($OwnedRemaining -join ', '). Attempts: $AttemptJson"
 }
 
 Remove-Item $StatePath -Force -ErrorAction SilentlyContinue
@@ -82,6 +175,6 @@ Remove-Item $StatePath -Force -ErrorAction SilentlyContinue
     attempts = @($Attempts.ToArray())
     remaining_listener_process_ids = $RemainingPids
     foreign_listeners_preserved = @($RemainingPids | Where-Object {
-        -not $State -or -not $State.listener_pid -or [int]$_ -ne [int]$State.listener_pid
+        -not ($RecordedPids -contains [int]$_)
     })
 } | ConvertTo-Json -Depth 10
