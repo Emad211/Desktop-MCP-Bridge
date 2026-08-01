@@ -25,6 +25,7 @@ REQUIRED_TOOLS = {
     "write_text_file",
     "run_command",
 }
+TOOL_NAMESPACE_SEPARATORS = ("__", "_", ".", "/", ":", "-")
 
 
 def describe_exception(exc: BaseException) -> dict[str, Any]:
@@ -38,6 +39,38 @@ def describe_exception(exc: BaseException) -> dict[str, Any]:
         rendered = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
         payload["traceback"] = rendered[-8000:]
     return payload
+
+
+def resolve_tool_name(tool_names: list[str], logical_name: str) -> str:
+    """Resolve a logical tool name through SuperAssistant's server namespace.
+
+    The proxy may expose a tool unchanged or prefix it with the MCP server name
+    to avoid collisions when multiple child servers are aggregated.
+    """
+
+    if logical_name in tool_names:
+        return logical_name
+
+    candidates: list[str] = []
+    for name in tool_names:
+        if not name.endswith(logical_name):
+            continue
+        prefix = name[: -len(logical_name)]
+        if prefix and any(prefix.endswith(separator) for separator in TOOL_NAMESPACE_SEPARATORS):
+            candidates.append(name)
+
+    if len(candidates) == 1:
+        return candidates[0]
+    if not candidates:
+        sample = ", ".join(tool_names[:80])
+        raise RuntimeError(
+            f"SSE tools/list has no resolvable tool for {logical_name!r}. "
+            f"Available tools: {sample}"
+        )
+    raise RuntimeError(
+        f"SSE tools/list has ambiguous names for {logical_name!r}: "
+        f"{', '.join(sorted(candidates))}"
+    )
 
 
 async def read_sse_events(
@@ -208,10 +241,21 @@ async def probe(endpoint: str, timeout: float) -> dict[str, Any]:
                     for tool in raw_tools
                     if isinstance(tool, dict) and tool.get("name")
                 )
-                missing = sorted(REQUIRED_TOOLS.difference(tool_names))
-                if missing:
+                resolved_tools = {
+                    logical_name: resolve_tool_name(tool_names, logical_name)
+                    for logical_name in sorted(REQUIRED_TOOLS)
+                }
+                tools_with_output_schema = sorted(
+                    str(tool.get("name"))
+                    for tool in raw_tools
+                    if isinstance(tool, dict)
+                    and tool.get("name")
+                    and tool.get("outputSchema") is not None
+                )
+                if tools_with_output_schema:
                     raise RuntimeError(
-                        f"SSE tools/list is missing required tools: {', '.join(missing)}"
+                        "SuperAssistant-facing tools unexpectedly contain outputSchema: "
+                        + ", ".join(tools_with_output_schema)
                     )
 
                 await post(
@@ -220,7 +264,7 @@ async def probe(endpoint: str, timeout: float) -> dict[str, Any]:
                         "id": 3,
                         "method": "tools/call",
                         "params": {
-                            "name": "bridge_status",
+                            "name": resolved_tools["bridge_status"],
                             "arguments": {},
                         },
                     }
@@ -232,6 +276,11 @@ async def probe(endpoint: str, timeout: float) -> dict[str, Any]:
                 if not isinstance(content, list) or not content:
                     raise RuntimeError("bridge_status returned no content blocks over SSE")
 
+                name_mode = (
+                    "exact"
+                    if all(logical == actual for logical, actual in resolved_tools.items())
+                    else "proxy-namespaced"
+                )
                 return {
                     "ok": True,
                     "endpoint": endpoint,
@@ -241,6 +290,9 @@ async def probe(endpoint: str, timeout: float) -> dict[str, Any]:
                     "server_info": initialize_result.get("serverInfo"),
                     "tool_count": len(tool_names),
                     "required_tools_present": sorted(REQUIRED_TOOLS),
+                    "resolved_tools": resolved_tools,
+                    "tool_name_mode": name_mode,
+                    "tools_with_output_schema": tools_with_output_schema,
                     "bridge_status_content_blocks": len(content),
                     "bridge_status_is_error": bool(status_result.get("isError", False)),
                     "transport_probe": "wire-level-eventsource-post",
