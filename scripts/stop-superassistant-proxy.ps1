@@ -16,7 +16,14 @@ function Get-ProcessStartTime {
     param([int]$ProcessId)
     $Process = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
     if (-not $Process) { return $null }
-    try { return $Process.StartTime.ToUniversalTime().ToString("o") } catch { return $null }
+    try { return $Process.StartTime.ToUniversalTime() } catch { return $null }
+}
+
+function Test-ProcessOwnsPort {
+    param([int]$ProcessId)
+    $Rows = @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue |
+        Where-Object { [int]$_.OwningProcess -eq $ProcessId })
+    return $Rows.Count -gt 0
 }
 
 function Test-ExpectedIdentity {
@@ -25,7 +32,24 @@ function Test-ExpectedIdentity {
     if (-not $Actual) { return $false }
     $Expected = @($ExpectedStartedAt | Where-Object { $_ })
     if ($Expected.Count -eq 0) { return $true }
-    return $Expected -contains $Actual
+
+    foreach ($Text in $Expected) {
+        try {
+            $Parsed = [datetimeoffset]::Parse([string]$Text).UtcDateTime
+            if ([Math]::Abs(($Actual - $Parsed).TotalSeconds) -le 2) {
+                return $true
+            }
+        } catch {}
+    }
+
+    # Process.StartTime precision is not stable across all Windows APIs/runners.
+    # A recorded PID that is currently the sole owner of the configured localhost
+    # listener is stronger evidence than an exact sub-second timestamp comparison.
+    if (Test-ProcessOwnsPort -ProcessId $ProcessId) {
+        $Process = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
+        if ($Process -and $Process.ProcessName -eq "node") { return $true }
+    }
+    return $false
 }
 
 function Add-StopAttempt {
@@ -61,7 +85,7 @@ function Stop-OwnedProcessTree {
             -ProcessId $ProcessId `
             -Role $Role `
             -Succeeded $false `
-            -Output "process-start-time-mismatch"
+            -Output "process-identity-mismatch-and-not-port-owner"
         return
     }
 
