@@ -9,6 +9,7 @@ on:
       - "scripts/*superassistant*.ps1"
       - "scripts/*chatgpt*.ps1"
       - "scripts/probe_mcp_stdio.py"
+      - "scripts/probe_superassistant_sse.py"
       - "tests/test_superassistant_compat.py"
       - "tests/test_superassistant_launcher_static.py"
       - ".github/workflows/superassistant-contract.yml"
@@ -74,7 +75,7 @@ jobs:
             --config superassistant-ci.json `
             --server desktop-mcp-bridge `
             --timeout 45
-      - name: Launch hidden proxy, verify listener, and stop process tree
+      - name: Launch hidden proxy, probe SSE, verify listener, and stop process tree
         shell: pwsh
         run: |
           $ConfigPath = (Resolve-Path superassistant-ci.json).Path
@@ -94,7 +95,20 @@ jobs:
             if ($Status.launcher_process_name -ne "node") { throw "Launcher is not node.exe." }
             if ($Status.listener_process_name -ne "node") { throw "Listener is not node.exe." }
             if ($Status.foreign_listener_process_ids.Count -ne 0) { throw "Foreign listener detected." }
-            $Status | ConvertTo-Json -Depth 20
+
+            $SseRaw = python scripts/probe_superassistant_sse.py `
+              --endpoint $Status.endpoint `
+              --timeout 45
+            if ($LASTEXITCODE -ne 0) { throw "SSE probe failed: $($SseRaw | Out-String)" }
+            $Sse = $SseRaw | ConvertFrom-Json
+            if ($Sse.ok -ne $true) { throw "SSE probe returned ok=false." }
+            if ($Sse.tool_count -lt 4) { throw "SSE tools/list returned too few tools." }
+            if ($Sse.bridge_status_is_error -eq $true) { throw "bridge_status failed over SSE." }
+
+            [ordered]@{
+              proxy = $Status
+              sse = $Sse
+            } | ConvertTo-Json -Depth 20
           } finally {
             .\scripts\stop-superassistant-proxy.ps1 | Out-Null
           }
