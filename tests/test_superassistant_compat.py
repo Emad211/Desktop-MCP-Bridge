@@ -11,7 +11,7 @@ def test_superassistant_compatibility_disables_output_schemas() -> None:
     assert "run_command" in summary["tool_names"]
     assert "browser_snapshot" in summary["tool_names"]
 
-    manager = getattr(mcp, "_tool_manager")
+    manager = mcp._tool_manager
     for tool in manager.list_tools():
         metadata = getattr(tool, "fn_metadata", None)
         assert metadata is not None
