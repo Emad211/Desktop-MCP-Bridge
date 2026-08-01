@@ -10,6 +10,7 @@ on:
       - "scripts/*chatgpt*.ps1"
       - "scripts/probe_mcp_stdio.py"
       - "tests/test_superassistant_compat.py"
+      - "tests/test_superassistant_launcher_static.py"
       - ".github/workflows/superassistant-contract.yml"
 
 permissions:
@@ -26,8 +27,11 @@ jobs:
           cache: pip
       - run: python -m pip install --upgrade pip
       - run: python -m pip install -e ".[dev]"
-      - name: Run compatibility unit test
-        run: python -m pytest tests/test_superassistant_compat.py
+      - name: Run compatibility and launcher regression tests
+        run: >-
+          python -m pytest
+          tests/test_superassistant_compat.py
+          tests/test_superassistant_launcher_static.py
       - name: Validate VPN-aware network plan
         shell: pwsh
         run: |
@@ -70,3 +74,27 @@ jobs:
             --config superassistant-ci.json `
             --server desktop-mcp-bridge `
             --timeout 45
+      - name: Launch hidden proxy, verify listener, and stop process tree
+        shell: pwsh
+        run: |
+          $ConfigPath = (Resolve-Path superassistant-ci.json).Path
+          try {
+            $Raw = .\scripts\start-superassistant-proxy.ps1 `
+              -ConfigPath $ConfigPath `
+              -OutputTransport sse `
+              -NetworkMode direct `
+              -ProxyPackageVersion 0.1.8 `
+              -RefreshProxyRuntime `
+              -StartupTimeoutSeconds 120 `
+              -Restart
+            $Status = $Raw | ConvertFrom-Json
+            if ($Status.owned_listener_healthy -ne $true) { throw "Hidden proxy listener is not healthy." }
+            if ($Status.bridge_connected -ne $true) { throw "Hidden proxy did not connect the MCP child." }
+            if ($Status.launch_method -ne "direct-node-hidden") { throw "Unexpected launch method." }
+            if ($Status.launcher_process_name -ne "node") { throw "Launcher is not node.exe." }
+            if ($Status.listener_process_name -ne "node") { throw "Listener is not node.exe." }
+            if ($Status.foreign_listener_process_ids.Count -ne 0) { throw "Foreign listener detected." }
+            $Status | ConvertTo-Json -Depth 20
+          } finally {
+            .\scripts\stop-superassistant-proxy.ps1 | Out-Null
+          }
