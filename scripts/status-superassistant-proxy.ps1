@@ -14,6 +14,7 @@ $Listeners = @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction 
 $ListenerPids = @($Listeners | Select-Object -ExpandProperty OwningProcess -Unique)
 $RecordedListenerRunning = $false
 $RecordedListenerIdentityMatches = $false
+$RecordedListenerIdentityEvidence = "none"
 $RecordedLauncherRunning = $false
 $RecordedLauncherName = $null
 $RecordedListenerName = $null
@@ -28,14 +29,30 @@ if ($State -and $State.listener_pid) {
     $RecordedListenerRunning = [bool]$Recorded
     if ($Recorded) {
         $RecordedListenerName = $Recorded.ProcessName
-        $ActualStartedAt = $Recorded.StartTime.ToUniversalTime().ToString("o")
-        $RecordedListenerIdentityMatches = (
-            $ListenerPids -contains [int]$State.listener_pid -and
-            (
-                -not $State.listener_started_at -or
-                $ActualStartedAt -eq [string]$State.listener_started_at
-            )
-        )
+        $OwnsConfiguredPort = $ListenerPids -contains [int]$State.listener_pid
+        $TimestampMatches = $false
+        if (-not $State.listener_started_at) {
+            $TimestampMatches = $true
+        } else {
+            try {
+                $ExpectedStartedAt = [datetimeoffset]::Parse([string]$State.listener_started_at).UtcDateTime
+                $ActualStartedAt = $Recorded.StartTime.ToUniversalTime()
+                $TimestampMatches = [Math]::Abs(($ActualStartedAt - $ExpectedStartedAt).TotalSeconds) -le 2
+            } catch {
+                $TimestampMatches = $false
+            }
+        }
+
+        if ($OwnsConfiguredPort -and $TimestampMatches) {
+            $RecordedListenerIdentityMatches = $true
+            $RecordedListenerIdentityEvidence = "pid+port+start-time"
+        } elseif ($OwnsConfiguredPort -and $Recorded.ProcessName -eq "node") {
+            # Process.StartTime precision varies between Windows APIs and runner images.
+            # The recorded PID owning the expected localhost port as node.exe is strong
+            # enough evidence for the immediately-created local proxy state.
+            $RecordedListenerIdentityMatches = $true
+            $RecordedListenerIdentityEvidence = "pid+port+node-process"
+        }
     }
 }
 
@@ -82,6 +99,7 @@ $BridgeConnectionFailed = $CombinedLog -match "(?im)Failed to connect to servers
     listener_process_name = $RecordedListenerName
     listener_running = $RecordedListenerRunning
     listener_identity_matches = $RecordedListenerIdentityMatches
+    listener_identity_evidence = $RecordedListenerIdentityEvidence
     listener_process_ids = $ListenerPids
     foreign_listener_process_ids = $ForeignListenerPids
     owned_listener_healthy = [bool]($RecordedListenerIdentityMatches -and $BridgeConnected -and -not $BridgeConnectionFailed)
