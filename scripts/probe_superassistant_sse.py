@@ -10,10 +10,24 @@ import argparse
 import asyncio
 import json
 import sys
+import traceback
 from typing import Any
 
 from mcp import ClientSession
 from mcp.client.sse import sse_client
+
+
+def describe_exception(exc: BaseException) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "type": type(exc).__name__,
+        "message": str(exc),
+    }
+    if isinstance(exc, BaseExceptionGroup):
+        payload["exceptions"] = [describe_exception(item) for item in exc.exceptions]
+    else:
+        rendered = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+        payload["traceback"] = rendered[-8000:]
+    return payload
 
 
 async def probe(endpoint: str, timeout: float) -> dict[str, Any]:
@@ -72,12 +86,11 @@ def main() -> int:
     args = build_parser().parse_args()
     try:
         result = asyncio.run(probe(args.endpoint, args.timeout))
-    except Exception as exc:  # noqa: BLE001 - CLI boundary must emit structured error
+    except BaseException as exc:  # noqa: BLE001 - CLI boundary emits diagnostics
         error = {
             "ok": False,
             "endpoint": args.endpoint,
-            "error_type": type(exc).__name__,
-            "error": str(exc),
+            "exception": describe_exception(exc),
         }
         print(json.dumps(error, ensure_ascii=False, indent=2))
         return 1
