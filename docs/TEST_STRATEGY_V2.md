@@ -7,7 +7,7 @@ The test strategy must answer five separate questions:
 1. Is the Python runtime correct?
 2. Does the MCP contract work independently of the browser extension?
 3. Does the local SuperAssistant proxy correctly expose the bridge?
-4. Does an MCP client complete a real initialize/list/call round trip through the browser-facing SSE endpoint?
+4. Does a browser-style client complete a real initialize/list/call round trip through the browser-facing SSE endpoint?
 5. Can normal ChatGPT web discover, execute, and consume the tools on the target Windows device?
 
 A green unit suite is necessary but not sufficient. Windows desktop, UI Automation, browser, OCR, UAC, proxy, SSE transport, and extension behavior require integration or real-device acceptance.
@@ -82,21 +82,26 @@ The release path uses SSE first because it is the most established extension-fac
 
 This layer verifies the exact network path used by MCP SuperAssistant without depending on the ChatGPT DOM.
 
-The test client connects to `http://localhost:<port>/sse` using the MCP SDK, then performs:
+The probe uses an EventSource-compatible HTTP stream and raw JSON-RPC POST requests, matching the browser extension's transport pattern:
 
-1. SSE connection and message endpoint negotiation.
-2. MCP `initialize`.
-3. `tools/list` through the proxy.
-4. Assert `bridge_status`, `read_text_file`, `write_text_file`, and `run_command` are present.
-5. `tools/call` for `bridge_status`.
-6. Assert the call does not return `isError=true`.
-7. Close the client while leaving the managed proxy healthy.
+1. Open `GET http://localhost:<port>/sse` with `Accept: text/event-stream`.
+2. Receive the session-specific message endpoint announced by the SSE `endpoint` event.
+3. POST MCP `initialize` to that endpoint.
+4. POST `notifications/initialized`.
+5. POST `tools/list` and resolve the proxy's namespaced tool names back to their logical names.
+6. Assert `bridge_status`, `read_text_file`, `write_text_file`, and `run_command` are present.
+7. Assert no SuperAssistant-facing tool exposes an incompatible `outputSchema`.
+8. POST `tools/call` using the resolved proxy name for `bridge_status`.
+9. Assert the call does not return `isError=true` and contains at least one content block.
+10. Close the SSE client while leaving the managed proxy healthy.
+
+SuperAssistant may prefix tool names with the child server name to avoid collisions. The acceptance criterion is therefore a unique and reversible logical-to-exposed mapping, not literal equality with the unprefixed child tool name.
 
 This layer distinguishes three otherwise-confusable failures:
 
 - child MCP failure;
 - proxy aggregation/listener failure;
-- browser-facing SSE protocol failure.
+- browser-facing SSE protocol or namespace-routing failure.
 
 The probe is implemented by `scripts/probe_superassistant_sse.py` and runs both in CI and the one-command target-device preflight.
 
@@ -150,7 +155,7 @@ Manual because it depends on the extension, ChatGPT DOM, account state, and brow
 | Case | Expected result |
 |---|---|
 | Connect extension | Status changes to Connected |
-| Refresh tools | Core tools are visible |
+| Refresh tools | Namespaced or unprefixed core tools are visible |
 | Insert instructions | Model uses the required tool-call format |
 | `bridge_status` | Read-only result returns to the same chat |
 | Read acceptance file | Exact content is returned |
@@ -171,6 +176,7 @@ The local acceptance report records:
 - proxy transport and endpoint;
 - stdio and SSE probe results;
 - expected and observed tool counts;
+- logical-to-exposed tool-name mapping;
 - passed/failed cases;
 - redacted log locations;
 - screenshots only when they contain no sensitive data.
@@ -180,7 +186,7 @@ The local acceptance report records:
 - **L0 Python/runtime:** import, dependency, syntax, or process startup failure.
 - **L1 MCP child:** initialize, tools list, or direct child tool-call failure.
 - **L2 proxy lifecycle:** child aggregation, listener, process ownership, start, restart, or stop failure.
-- **L3 SSE transport:** browser-facing connection, message negotiation, proxied tools list, or proxied tool-call failure.
+- **L3 SSE transport:** browser-facing connection, message negotiation, namespace resolution, proxied tools list, or proxied tool-call failure.
 - **L4 extension:** connection, tool discovery, rendering, Run, or result insertion failure.
 - **L5 model protocol:** malformed tool-call output or failure to follow inserted instructions.
 - **L6 desktop capability:** Windows, browser, OCR, UIA, shell, development, or hardware failure.
