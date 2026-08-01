@@ -5,6 +5,10 @@ param(
     [ValidateSet("sse", "streamableHttp", "ws")]
     [string]$OutputTransport = "sse",
     [int]$Port = 3006,
+    [ValidateSet("auto", "direct", "proxy")]
+    [string]$NetworkMode = "auto",
+    [string]$ProxyUrl = "",
+    [string]$ProxyPackageVersion = "0.1.8",
     [switch]$InstallNodeIfMissing,
     [switch]$LeaveRunning,
     [switch]$IUnderstand
@@ -31,11 +35,25 @@ $Report = [ordered]@{
     profile = $Profile
     output_transport = $OutputTransport
     port = $Port
+    requested_network_mode = $NetworkMode
+    proxy_package_version = $ProxyPackageVersion
     started_at = (Get-Date).ToUniversalTime().ToString("o")
     steps = [ordered]@{}
 }
 
 try {
+    Write-Host "[1/5] Resolving VPN/network route for npm and preserving localhost bypass..." -ForegroundColor Cyan
+    $NetworkArguments = @{ NetworkMode = $NetworkMode }
+    if ($ProxyUrl) { $NetworkArguments.ProxyUrl = $ProxyUrl }
+    $NetworkRaw = & (Join-Path $PSScriptRoot "get-superassistant-network-plan.ps1") @NetworkArguments
+    $Network = $NetworkRaw | ConvertFrom-Json
+    $Report.steps.network_plan = $Network
+    if ($Network.ok -ne $true) {
+        throw "No usable route to npm was found. Turn VPN/V2Ray on and rerun."
+    }
+    Write-Host "      Route=$($Network.resolved_mode); VPN/TUN likely active=$($Network.vpn_or_tun_likely_active)" -ForegroundColor DarkCyan
+
+    Write-Host "[2/5] Exporting absolute MCP stdio configuration..." -ForegroundColor Cyan
     $ExportArguments = @{
         Profile = $Profile
         AllowedRoot = $AllowedRoot
@@ -47,6 +65,7 @@ try {
     if ($Export.ok -ne $true) { throw "Config export returned ok=false." }
     $Report.steps.config_export = $Export
 
+    Write-Host "[3/5] Starting the MCP child directly and probing initialize/tools/list/bridge_status..." -ForegroundColor Cyan
     $ProbeRaw = & $Python (Join-Path $PSScriptRoot "probe_mcp_stdio.py") `
         --config $ConfigPath `
         --server desktop-mcp-bridge `
@@ -58,18 +77,25 @@ try {
     if ($Probe.ok -ne $true) { throw "MCP stdio probe returned ok=false." }
     $Report.steps.mcp_stdio = $Probe
 
-    $StartRaw = & (Join-Path $PSScriptRoot "start-superassistant-proxy.ps1") `
-        -OutputTransport $OutputTransport `
-        -Port $Port `
-        -ConfigPath $ConfigPath `
-        -InstallNodeIfMissing:$InstallNodeIfMissing `
-        -Restart
+    Write-Host "[4/5] Starting the pinned local SuperAssistant proxy on localhost:$Port..." -ForegroundColor Cyan
+    $StartArguments = @{
+        OutputTransport = $OutputTransport
+        Port = $Port
+        ConfigPath = $ConfigPath
+        NetworkMode = $NetworkMode
+        ProxyPackageVersion = $ProxyPackageVersion
+        InstallNodeIfMissing = $InstallNodeIfMissing
+        Restart = $true
+    }
+    if ($ProxyUrl) { $StartArguments.ProxyUrl = $ProxyUrl }
+    $StartRaw = & (Join-Path $PSScriptRoot "start-superassistant-proxy.ps1") @StartArguments
     $Start = $StartRaw | ConvertFrom-Json
     if ($Start.owned_listener_healthy -ne $true) {
         throw "SuperAssistant proxy startup did not produce a healthy owned listener."
     }
     $Report.steps.proxy_start = $Start
 
+    Write-Host "[5/5] Verifying listener ownership, child connection, and extension handoff..." -ForegroundColor Cyan
     $StatusRaw = & (Join-Path $PSScriptRoot "status-superassistant-proxy.ps1") `
         -Port $Port `
         -StatePath $StatePath
@@ -89,13 +115,16 @@ try {
         instructions_path = (Join-Path $RepoRoot "gpt\SUPERASSISTANT_INSTRUCTIONS.md")
         auto_execute_default = $false
         auto_submit_default = $false
+        vpn_instruction = "Keep VPN on for the first browser acceptance test. Localhost is bypassed through NO_PROXY."
         next_action = "Open ChatGPT web, reload MCP SuperAssistant, connect to the endpoint, refresh tools, and insert the instructions file."
     }
+    Write-Host "Preflight passed. Endpoint: $($Status.endpoint)" -ForegroundColor Green
 } catch {
     $Report.error = [ordered]@{
         type = $_.Exception.GetType().Name
         message = $_.Exception.Message
     }
+    Write-Host "Preflight failed: $($_.Exception.Message)" -ForegroundColor Red
     throw
 } finally {
     if (-not $LeaveRunning) {
