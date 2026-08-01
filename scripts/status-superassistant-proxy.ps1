@@ -15,14 +15,19 @@ $ListenerPids = @($Listeners | Select-Object -ExpandProperty OwningProcess -Uniq
 $RecordedListenerRunning = $false
 $RecordedListenerIdentityMatches = $false
 $RecordedLauncherRunning = $false
+$RecordedLauncherName = $null
+$RecordedListenerName = $null
 
 if ($State -and $State.launcher_pid) {
-    $RecordedLauncherRunning = [bool](Get-Process -Id ([int]$State.launcher_pid) -ErrorAction SilentlyContinue)
+    $LauncherProcess = Get-Process -Id ([int]$State.launcher_pid) -ErrorAction SilentlyContinue
+    $RecordedLauncherRunning = [bool]$LauncherProcess
+    if ($LauncherProcess) { $RecordedLauncherName = $LauncherProcess.ProcessName }
 }
 if ($State -and $State.listener_pid) {
     $Recorded = Get-Process -Id ([int]$State.listener_pid) -ErrorAction SilentlyContinue
     $RecordedListenerRunning = [bool]$Recorded
     if ($Recorded) {
+        $RecordedListenerName = $Recorded.ProcessName
         $ActualStartedAt = $Recorded.StartTime.ToUniversalTime().ToString("o")
         $RecordedListenerIdentityMatches = (
             $ListenerPids -contains [int]$State.listener_pid -and
@@ -50,10 +55,12 @@ if ($State -and $State.stderr_log -and (Test-Path $State.stderr_log)) {
     $StderrTail = (Get-Content $State.stderr_log -Tail $LogTailLines | Out-String).Trim()
 }
 $CombinedLog = ($StdoutTail + "`n" + $StderrTail).Trim()
-$BridgeConnected = $CombinedLog -match "(?im)Connected servers:\s*.*desktop-mcp-bridge" -or (
-    $CombinedLog -match "(?im)Connected to\s+1\s+of\s+1\s+servers" -and
-    $CombinedLog -notmatch "(?im)Failed to connect to servers:\s*.*desktop-mcp-bridge"
-)
+$BridgeConnected = $CombinedLog -match "(?im)Connected servers:\s*.*desktop-mcp-bridge" -or
+    $CombinedLog -match "(?im)Connected to server:\s*desktop-mcp-bridge" -or
+    $CombinedLog -match "(?im)Successfully initialized server:\s*desktop-mcp-bridge" -or (
+        $CombinedLog -match "(?im)Connected to\s+1\s+of\s+1\s+servers" -and
+        $CombinedLog -notmatch "(?im)Failed to connect to servers:\s*.*desktop-mcp-bridge"
+    )
 $BridgeConnectionFailed = $CombinedLog -match "(?im)Failed to connect to servers:\s*.*desktop-mcp-bridge"
 
 [ordered]@{
@@ -63,9 +70,16 @@ $BridgeConnectionFailed = $CombinedLog -match "(?im)Failed to connect to servers
     endpoint = if ($State) { $State.endpoint } else { $null }
     output_transport = if ($State) { $State.output_transport } else { $null }
     config_path = if ($State) { $State.config_path } else { $null }
+    launch_method = if ($State) { $State.launch_method } else { $null }
+    package_version = if ($State) { $State.package_version } else { $null }
+    runtime_dir = if ($State) { $State.runtime_dir } else { $null }
+    proxy_entry = if ($State) { $State.proxy_entry } else { $null }
+    node_path = if ($State) { $State.node_path } else { $null }
     launcher_pid = if ($State) { $State.launcher_pid } else { $null }
+    launcher_process_name = $RecordedLauncherName
     launcher_running = $RecordedLauncherRunning
     listener_pid = if ($State) { $State.listener_pid } else { $null }
+    listener_process_name = $RecordedListenerName
     listener_running = $RecordedListenerRunning
     listener_identity_matches = $RecordedListenerIdentityMatches
     listener_process_ids = $ListenerPids
