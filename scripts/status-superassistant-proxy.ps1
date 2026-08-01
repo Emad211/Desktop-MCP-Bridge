@@ -1,0 +1,112 @@
+param(
+    [int]$Port = 3006,
+    [string]$StatePath = (Join-Path $env:LOCALAPPDATA "DesktopMCPBridge\superassistant-proxy.json"),
+    [int]$LogTailLines = 80
+)
+
+$ErrorActionPreference = "Stop"
+$State = $null
+if (Test-Path $StatePath) {
+    try { $State = Get-Content $StatePath -Raw | ConvertFrom-Json } catch {}
+}
+
+$Listeners = @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)
+$ListenerPids = @($Listeners | Select-Object -ExpandProperty OwningProcess -Unique)
+$RecordedListenerRunning = $false
+$RecordedListenerIdentityMatches = $false
+$RecordedListenerIdentityEvidence = "none"
+$RecordedLauncherRunning = $false
+$RecordedLauncherName = $null
+$RecordedListenerName = $null
+
+if ($State -and $State.launcher_pid) {
+    $LauncherProcess = Get-Process -Id ([int]$State.launcher_pid) -ErrorAction SilentlyContinue
+    $RecordedLauncherRunning = [bool]$LauncherProcess
+    if ($LauncherProcess) { $RecordedLauncherName = $LauncherProcess.ProcessName }
+}
+if ($State -and $State.listener_pid) {
+    $Recorded = Get-Process -Id ([int]$State.listener_pid) -ErrorAction SilentlyContinue
+    $RecordedListenerRunning = [bool]$Recorded
+    if ($Recorded) {
+        $RecordedListenerName = $Recorded.ProcessName
+        $OwnsConfiguredPort = $ListenerPids -contains [int]$State.listener_pid
+        $TimestampMatches = $false
+        if (-not $State.listener_started_at) {
+            $TimestampMatches = $true
+        } else {
+            try {
+                $ExpectedStartedAt = [datetimeoffset]::Parse([string]$State.listener_started_at).UtcDateTime
+                $ActualStartedAt = $Recorded.StartTime.ToUniversalTime()
+                $TimestampMatches = [Math]::Abs(($ActualStartedAt - $ExpectedStartedAt).TotalSeconds) -le 2
+            } catch {
+                $TimestampMatches = $false
+            }
+        }
+
+        if ($OwnsConfiguredPort -and $TimestampMatches) {
+            $RecordedListenerIdentityMatches = $true
+            $RecordedListenerIdentityEvidence = "pid+port+start-time"
+        } elseif ($OwnsConfiguredPort -and $Recorded.ProcessName -eq "node") {
+            # Process.StartTime precision varies between Windows APIs and runner images.
+            # The recorded PID owning the expected localhost port as node.exe is strong
+            # enough evidence for the immediately-created local proxy state.
+            $RecordedListenerIdentityMatches = $true
+            $RecordedListenerIdentityEvidence = "pid+port+node-process"
+        }
+    }
+}
+
+$ForeignListenerPids = @()
+foreach ($ListenerPid in $ListenerPids) {
+    if (-not $State -or -not $State.listener_pid -or [int]$ListenerPid -ne [int]$State.listener_pid) {
+        $ForeignListenerPids += [int]$ListenerPid
+    }
+}
+
+$StdoutTail = ""
+$StderrTail = ""
+if ($State -and $State.stdout_log -and (Test-Path $State.stdout_log)) {
+    $StdoutTail = (Get-Content $State.stdout_log -Tail $LogTailLines | Out-String).Trim()
+}
+if ($State -and $State.stderr_log -and (Test-Path $State.stderr_log)) {
+    $StderrTail = (Get-Content $State.stderr_log -Tail $LogTailLines | Out-String).Trim()
+}
+$CombinedLog = ($StdoutTail + "`n" + $StderrTail).Trim()
+$BridgeConnected = $CombinedLog -match "(?im)Connected servers:\s*.*desktop-mcp-bridge" -or
+    $CombinedLog -match "(?im)Connected to server:\s*desktop-mcp-bridge" -or
+    $CombinedLog -match "(?im)Successfully initialized server:\s*desktop-mcp-bridge" -or (
+        $CombinedLog -match "(?im)Connected to\s+1\s+of\s+1\s+servers" -and
+        $CombinedLog -notmatch "(?im)Failed to connect to servers:\s*.*desktop-mcp-bridge"
+    )
+$BridgeConnectionFailed = $CombinedLog -match "(?im)Failed to connect to servers:\s*.*desktop-mcp-bridge"
+
+[ordered]@{
+    state_found = [bool]$State
+    state_path = $StatePath
+    port = $Port
+    endpoint = if ($State) { $State.endpoint } else { $null }
+    output_transport = if ($State) { $State.output_transport } else { $null }
+    config_path = if ($State) { $State.config_path } else { $null }
+    launch_method = if ($State) { $State.launch_method } else { $null }
+    package_version = if ($State) { $State.package_version } else { $null }
+    runtime_dir = if ($State) { $State.runtime_dir } else { $null }
+    proxy_entry = if ($State) { $State.proxy_entry } else { $null }
+    node_path = if ($State) { $State.node_path } else { $null }
+    launcher_pid = if ($State) { $State.launcher_pid } else { $null }
+    launcher_process_name = $RecordedLauncherName
+    launcher_running = $RecordedLauncherRunning
+    listener_pid = if ($State) { $State.listener_pid } else { $null }
+    listener_process_name = $RecordedListenerName
+    listener_running = $RecordedListenerRunning
+    listener_identity_matches = $RecordedListenerIdentityMatches
+    listener_identity_evidence = $RecordedListenerIdentityEvidence
+    listener_process_ids = $ListenerPids
+    foreign_listener_process_ids = $ForeignListenerPids
+    owned_listener_healthy = [bool]($RecordedListenerIdentityMatches -and $BridgeConnected -and -not $BridgeConnectionFailed)
+    bridge_connected = [bool]$BridgeConnected
+    bridge_connection_failed = [bool]$BridgeConnectionFailed
+    stdout_log = if ($State) { $State.stdout_log } else { $null }
+    stderr_log = if ($State) { $State.stderr_log } else { $null }
+    stdout_tail = $StdoutTail
+    stderr_tail = $StderrTail
+} | ConvertTo-Json -Depth 10
