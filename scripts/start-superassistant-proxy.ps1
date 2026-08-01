@@ -3,6 +3,11 @@ param(
     [string]$OutputTransport = "sse",
     [int]$Port = 3006,
     [string]$ConfigPath = (Join-Path $env:LOCALAPPDATA "DesktopMCPBridge\superassistant\config.json"),
+    [ValidateSet("auto", "direct", "proxy")]
+    [string]$NetworkMode = "auto",
+    [string]$ProxyUrl = "",
+    [string]$ProxyPackageVersion = "0.1.8",
+    [int]$StartupTimeoutSeconds = 120,
     [switch]$InstallNodeIfMissing,
     [switch]$Restart
 )
@@ -52,6 +57,22 @@ function Test-ProcessDescendant {
     return $false
 }
 
+function Save-ProcessEnvironment {
+    param([string[]]$Names)
+    $Saved = @{}
+    foreach ($Name in $Names) {
+        $Saved[$Name] = [Environment]::GetEnvironmentVariable($Name, "Process")
+    }
+    return $Saved
+}
+
+function Restore-ProcessEnvironment {
+    param([hashtable]$Saved)
+    foreach ($Name in $Saved.Keys) {
+        [Environment]::SetEnvironmentVariable($Name, $Saved[$Name], "Process")
+    }
+}
+
 if (-not (Test-Path $ConfigPath)) {
     throw "SuperAssistant config was not found: $ConfigPath. Run scripts/export-superassistant-config.ps1 first."
 }
@@ -88,6 +109,17 @@ if (-not $Npx) {
     throw "Node.js was installed but npx is still unavailable. Open a new PowerShell and retry."
 }
 
+$NetworkArguments = @{
+    NetworkMode = $NetworkMode
+}
+if ($ProxyUrl) { $NetworkArguments.ProxyUrl = $ProxyUrl }
+$NetworkPlanRaw = & (Join-Path $PSScriptRoot "get-superassistant-network-plan.ps1") @NetworkArguments
+$NetworkPlan = $NetworkPlanRaw | ConvertFrom-Json
+if ($NetworkPlan.ok -ne $true) {
+    throw "The npm proxy package cannot be reached with the current network route. Turn VPN/V2Ray on and retry. Network plan: $($NetworkPlanRaw | Out-String)"
+}
+Write-Host "SuperAssistant network route: $($NetworkPlan.resolved_mode). $($NetworkPlan.bootstrap_instruction)" -ForegroundColor Cyan
+
 $Endpoint = switch ($OutputTransport) {
     "sse" { "http://localhost:$Port/sse" }
     "streamableHttp" { "http://localhost:$Port/mcp" }
@@ -95,24 +127,65 @@ $Endpoint = switch ($OutputTransport) {
 }
 
 Remove-Item $OutLog, $ErrLog -Force -ErrorAction SilentlyContinue
+$Package = "@srbhptl39/mcp-superassistant-proxy@$ProxyPackageVersion"
 $Arguments = @(
     "-y",
-    "@srbhptl39/mcp-superassistant-proxy@latest",
+    $Package,
     "--config", ('"{0}"' -f $ConfigPath),
     "--port", "$Port",
     "--outputTransport", $OutputTransport,
     "--logLevel", "info"
 )
-$Launcher = Start-Process -FilePath $Npx `
-    -ArgumentList ($Arguments -join " ") `
-    -WorkingDirectory (Split-Path -Parent $ConfigPath) `
-    -WindowStyle Minimized `
-    -RedirectStandardOutput $OutLog `
-    -RedirectStandardError $ErrLog `
-    -PassThru
+
+$EnvironmentNames = @(
+    "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY",
+    "http_proxy", "https_proxy", "all_proxy",
+    "NO_PROXY", "no_proxy",
+    "NPM_CONFIG_PROXY", "NPM_CONFIG_HTTPS_PROXY",
+    "NPM_CONFIG_FETCH_TIMEOUT", "NPM_CONFIG_FETCH_RETRIES",
+    "NPM_CONFIG_PREFER_OFFLINE", "NPM_CONFIG_AUDIT", "NPM_CONFIG_FUND"
+)
+$SavedEnvironment = Save-ProcessEnvironment -Names $EnvironmentNames
+try {
+    $env:NO_PROXY = [string]$NetworkPlan.local_bypass
+    $env:no_proxy = [string]$NetworkPlan.local_bypass
+    $env:NPM_CONFIG_FETCH_TIMEOUT = "30000"
+    $env:NPM_CONFIG_FETCH_RETRIES = "1"
+    $env:NPM_CONFIG_PREFER_OFFLINE = "true"
+    $env:NPM_CONFIG_AUDIT = "false"
+    $env:NPM_CONFIG_FUND = "false"
+
+    if ($NetworkPlan.resolved_mode -eq "proxy") {
+        $SelectedProxy = [string]$NetworkPlan.selected_proxy
+        $env:HTTP_PROXY = $SelectedProxy
+        $env:HTTPS_PROXY = $SelectedProxy
+        $env:http_proxy = $SelectedProxy
+        $env:https_proxy = $SelectedProxy
+        $env:NPM_CONFIG_PROXY = $SelectedProxy
+        $env:NPM_CONFIG_HTTPS_PROXY = $SelectedProxy
+    } elseif ($NetworkMode -eq "direct") {
+        foreach ($Name in @(
+            "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY",
+            "http_proxy", "https_proxy", "all_proxy",
+            "NPM_CONFIG_PROXY", "NPM_CONFIG_HTTPS_PROXY"
+        )) {
+            Remove-Item "Env:$Name" -ErrorAction SilentlyContinue
+        }
+    }
+
+    $Launcher = Start-Process -FilePath $Npx `
+        -ArgumentList ($Arguments -join " ") `
+        -WorkingDirectory (Split-Path -Parent $ConfigPath) `
+        -WindowStyle Minimized `
+        -RedirectStandardOutput $OutLog `
+        -RedirectStandardError $ErrLog `
+        -PassThru
+} finally {
+    Restore-ProcessEnvironment -Saved $SavedEnvironment
+}
 $LauncherStartedAt = $Launcher.StartTime.ToUniversalTime().ToString("o")
 
-$Deadline = (Get-Date).AddSeconds(90)
+$Deadline = (Get-Date).AddSeconds($StartupTimeoutSeconds)
 $ListenerPid = $null
 $ListenerStartedAt = $null
 $Connected = $false
@@ -149,12 +222,13 @@ do {
 
 if (-not $ListenerPid -or -not $Connected) {
     try { & taskkill.exe /PID $Launcher.Id /T /F | Out-Null } catch {}
-    throw "SuperAssistant proxy did not reach a verified connected state within 90 seconds. Inspect $OutLog and $ErrLog."
+    throw "SuperAssistant proxy did not reach a verified connected state within $StartupTimeoutSeconds seconds. Inspect $OutLog and $ErrLog."
 }
 
 $State = [ordered]@{
     provider = "mcp-superassistant-proxy"
-    package = "@srbhptl39/mcp-superassistant-proxy@latest"
+    package = $Package
+    package_version = $ProxyPackageVersion
     launcher_pid = $Launcher.Id
     launcher_started_at = $LauncherStartedAt
     listener_pid = $ListenerPid
@@ -165,6 +239,9 @@ $State = [ordered]@{
     config_path = $ConfigPath
     stdout_log = $OutLog
     stderr_log = $ErrLog
+    network_mode = $NetworkPlan.resolved_mode
+    selected_proxy = $NetworkPlan.selected_proxy
+    local_bypass = $NetworkPlan.local_bypass
     started_at = (Get-Date).ToUniversalTime().ToString("o")
 }
 $State | ConvertTo-Json -Depth 10 | Set-Content -Path $StatePath -Encoding UTF8
@@ -174,4 +251,5 @@ if (-not $Status.owned_listener_healthy) {
     & (Join-Path $PSScriptRoot "stop-superassistant-proxy.ps1") -Port $Port -StatePath $StatePath | Out-Null
     throw "Proxy state was written, but final ownership/connection validation failed."
 }
-$Status | ConvertTo-Json -Depth 10
+$Status | Add-Member -NotePropertyName network_plan -NotePropertyValue $NetworkPlan -Force
+$Status | ConvertTo-Json -Depth 20
