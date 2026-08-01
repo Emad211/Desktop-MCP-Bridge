@@ -42,7 +42,7 @@ $Report = [ordered]@{
 }
 
 try {
-    Write-Host "[1/5] Resolving VPN/network route for npm and preserving localhost bypass..." -ForegroundColor Cyan
+    Write-Host "[1/6] Resolving VPN/network route for npm and preserving localhost bypass..." -ForegroundColor Cyan
     $NetworkArguments = @{ NetworkMode = $NetworkMode }
     if ($ProxyUrl) { $NetworkArguments.ProxyUrl = $ProxyUrl }
     $NetworkRaw = & (Join-Path $PSScriptRoot "get-superassistant-network-plan.ps1") @NetworkArguments
@@ -53,7 +53,7 @@ try {
     }
     Write-Host "      Route=$($Network.resolved_mode); VPN/TUN likely active=$($Network.vpn_or_tun_likely_active)" -ForegroundColor DarkCyan
 
-    Write-Host "[2/5] Exporting absolute MCP stdio configuration..." -ForegroundColor Cyan
+    Write-Host "[2/6] Exporting absolute MCP stdio configuration..." -ForegroundColor Cyan
     $ExportArguments = @{
         Profile = $Profile
         AllowedRoot = $AllowedRoot
@@ -65,7 +65,7 @@ try {
     if ($Export.ok -ne $true) { throw "Config export returned ok=false." }
     $Report.steps.config_export = $Export
 
-    Write-Host "[3/5] Starting the MCP child directly and probing initialize/tools/list/bridge_status..." -ForegroundColor Cyan
+    Write-Host "[3/6] Starting the MCP child directly and probing initialize/tools/list/bridge_status..." -ForegroundColor Cyan
     $ProbeRaw = & $Python (Join-Path $PSScriptRoot "probe_mcp_stdio.py") `
         --config $ConfigPath `
         --server desktop-mcp-bridge `
@@ -77,7 +77,7 @@ try {
     if ($Probe.ok -ne $true) { throw "MCP stdio probe returned ok=false." }
     $Report.steps.mcp_stdio = $Probe
 
-    Write-Host "[4/5] Starting the pinned local SuperAssistant proxy on localhost:$Port..." -ForegroundColor Cyan
+    Write-Host "[4/6] Starting the pinned local SuperAssistant proxy on localhost:$Port..." -ForegroundColor Cyan
     $StartArguments = @{
         OutputTransport = $OutputTransport
         Port = $Port
@@ -95,7 +95,27 @@ try {
     }
     $Report.steps.proxy_start = $Start
 
-    Write-Host "[5/5] Verifying listener ownership, child connection, and extension handoff..." -ForegroundColor Cyan
+    Write-Host "[5/6] Probing the browser-facing transport through the local proxy..." -ForegroundColor Cyan
+    if ($OutputTransport -eq "sse") {
+        $SseProbeRaw = & $Python (Join-Path $PSScriptRoot "probe_superassistant_sse.py") `
+            --endpoint $Start.endpoint `
+            --timeout 45
+        if ($LASTEXITCODE -ne 0) {
+            throw "SuperAssistant SSE probe failed: $($SseProbeRaw | Out-String)"
+        }
+        $SseProbe = $SseProbeRaw | ConvertFrom-Json
+        if ($SseProbe.ok -ne $true) { throw "SuperAssistant SSE probe returned ok=false." }
+        $Report.steps.browser_transport = $SseProbe
+    } else {
+        $Report.steps.browser_transport = [ordered]@{
+            ok = $true
+            skipped = $true
+            reason = "Only the SSE extension path is part of Gate C acceptance."
+            output_transport = $OutputTransport
+        }
+    }
+
+    Write-Host "[6/6] Verifying listener ownership, child connection, and extension handoff..." -ForegroundColor Cyan
     $StatusRaw = & (Join-Path $PSScriptRoot "status-superassistant-proxy.ps1") `
         -Port $Port `
         -StatePath $StatePath
