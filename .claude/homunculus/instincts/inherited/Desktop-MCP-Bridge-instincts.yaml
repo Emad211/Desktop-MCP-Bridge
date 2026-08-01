@@ -1,0 +1,451 @@
+# Instincts generated from https://github.com/Emad211/Desktop-MCP-Bridge
+# Generated: 2026-08-01T01:05:20.069Z
+# Version: 2.0
+# NOTE: This file supplements (does not replace) any existing curated instincts.
+# High-confidence manually curated instincts should be preserved alongside these.
+
+---
+id: Desktop-MCP-Bridge-commit-conventional
+trigger: "when writing a commit message"
+confidence: 0.85
+domain: git
+source: repo-analysis
+source_repo: https://github.com/Emad211/Desktop-MCP-Bridge
+---
+
+# Desktop MCP Bridge Commit Conventional
+
+## Action
+
+Use conventional commit format with prefixes: docs, feat, test
+
+## Evidence
+
+- 14 commits analyzed
+- Detected conventional commit pattern
+- Examples: docs: define v2 scope and acceptance gates, feat: add SuperAssistant-compatible MCP entry point
+
+---
+id: Desktop-MCP-Bridge-commit-length
+trigger: "when writing a commit message"
+confidence: 0.6
+domain: git
+source: repo-analysis
+source_repo: https://github.com/Emad211/Desktop-MCP-Bridge
+---
+
+# Desktop MCP Bridge Commit Length
+
+## Action
+
+Keep commit messages concise (~44 characters)
+
+## Evidence
+
+- Average commit message length: 44 chars
+- Based on 14 commits
+
+---
+id: Desktop-MCP-Bridge-naming-files
+trigger: "when creating a new file"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/Emad211/Desktop-MCP-Bridge
+---
+
+# Desktop MCP Bridge Naming Files
+
+## Action
+
+Use snake_case naming convention
+
+## Evidence
+
+- Analyzed file naming patterns in repository
+- Dominant pattern: snake_case
+
+---
+id: Desktop-MCP-Bridge-import-relative
+trigger: "when importing modules"
+confidence: 0.75
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/Emad211/Desktop-MCP-Bridge
+---
+
+# Desktop MCP Bridge Import Relative
+
+## Action
+
+Use relative imports for project files
+
+## Evidence
+
+- Import analysis shows relative import pattern
+- Example: import { x } from '../lib/x'
+
+---
+id: Desktop-MCP-Bridge-export-style
+trigger: "when exporting from a module"
+confidence: 0.7
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/Emad211/Desktop-MCP-Bridge
+---
+
+# Desktop MCP Bridge Export Style
+
+## Action
+
+Prefer named exports
+
+## Evidence
+
+- Export pattern analysis
+- Dominant style: named
+
+---
+id: Desktop-MCP-Bridge-test-separate
+trigger: "when writing tests"
+confidence: 0.8
+domain: testing
+source: repo-analysis
+source_repo: https://github.com/Emad211/Desktop-MCP-Bridge
+---
+
+# Desktop MCP Bridge Test Separate
+
+## Action
+
+Place tests in the tests/ or __tests__/ directory, mirroring src structure
+
+## Evidence
+
+- Separate test directory pattern detected
+- Tests live in dedicated test folders
+
+---
+id: Desktop-MCP-Bridge-workflow-feature-development
+trigger: "when implementing a new feature"
+confidence: 0.9
+domain: workflow
+source: repo-analysis
+source_repo: https://github.com/Emad211/Desktop-MCP-Bridge
+---
+
+# Desktop MCP Bridge Workflow Feature Development
+
+## Action
+
+Follow the feature-development workflow:
+1. Add feature implementation
+2. Add tests for feature
+3. Update documentation
+
+## Evidence
+
+- Workflow detected from commit patterns
+- Frequency: ~21x per month
+- Files: **/*.test.*
+
+---
+id: Desktop-MCP-Bridge-workflow-add-or-update-documentation
+trigger: "when doing add or update documentation"
+confidence: 0.7
+domain: workflow
+source: repo-analysis
+source_repo: https://github.com/Emad211/Desktop-MCP-Bridge
+---
+
+# Desktop MCP Bridge Workflow Add Or Update Documentation
+
+## Action
+
+Follow the add-or-update-documentation workflow:
+1. Create or update a markdown file in docs/ or gpt/ or docs/ADR/ directories
+2. Commit with a 'docs:' prefix in the message
+
+## Evidence
+
+- Workflow detected from commit patterns
+- Frequency: ~4x per month
+- Files: docs/*.md, docs/ADR/*.md, gpt/*.md
+
+---
+id: Desktop-MCP-Bridge-workflow-add-or-update-superassistant-powershell-scripts
+trigger: "when doing add or update superassistant powershell scripts"
+confidence: 0.7
+domain: workflow
+source: repo-analysis
+source_repo: https://github.com/Emad211/Desktop-MCP-Bridge
+---
+
+# Desktop MCP Bridge Workflow Add Or Update Superassistant Powershell Scripts
+
+## Action
+
+Follow the add-or-update-superassistant-powershell-scripts workflow:
+1. Create or update a PowerShell script in scripts/ with a name matching *superassistant*.ps1
+2. Commit with a 'feat:' or 'test:' prefix in the message
+
+## Evidence
+
+- Workflow detected from commit patterns
+- Frequency: ~4x per month
+- Files: scripts/*superassistant*.ps1
+
+---
+id: desktop-mcp-bridge-instinct-file-naming
+trigger: "When creating or renaming a source file"
+confidence: 0.9
+domain: code-style
+source: repo-analysis
+source_repo: Emad211/Desktop-MCP-Bridge
+---
+
+# Desktop Mcp Bridge Instinct File Naming
+
+## Action
+
+Use snake_case for file names
+
+## Evidence
+
+- Pattern in srcLayout: desktop_mcp_bridge
+- namingConventions.files: snake_case
+
+---
+id: desktop-mcp-bridge-instinct-function-naming
+trigger: "When defining a function"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: Emad211/Desktop-MCP-Bridge
+---
+
+# Desktop Mcp Bridge Instinct Function Naming
+
+## Action
+
+Use camelCase for function names
+
+## Evidence
+
+- namingConventions.functions: camelCase
+
+---
+id: desktop-mcp-bridge-instinct-class-naming
+trigger: "When defining a class"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: Emad211/Desktop-MCP-Bridge
+---
+
+# Desktop Mcp Bridge Instinct Class Naming
+
+## Action
+
+Use PascalCase for class names
+
+## Evidence
+
+- namingConventions.classes: PascalCase
+
+---
+id: desktop-mcp-bridge-instinct-constant-naming
+trigger: "When defining a constant"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: Emad211/Desktop-MCP-Bridge
+---
+
+# Desktop Mcp Bridge Instinct Constant Naming
+
+## Action
+
+Use SCREAMING_SNAKE_CASE for constant names
+
+## Evidence
+
+- namingConventions.constants: SCREAMING_SNAKE_CASE
+
+---
+id: desktop-mcp-bridge-instinct-import-style
+trigger: "When importing modules within the package"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: Emad211/Desktop-MCP-Bridge
+---
+
+# Desktop Mcp Bridge Instinct Import Style
+
+## Action
+
+Use relative imports
+
+## Evidence
+
+- importStyle: relative
+
+---
+id: desktop-mcp-bridge-instinct-export-style
+trigger: "When exporting symbols from a module"
+confidence: 0.7
+domain: code-style
+source: repo-analysis
+source_repo: Emad211/Desktop-MCP-Bridge
+---
+
+# Desktop Mcp Bridge Instinct Export Style
+
+## Action
+
+Use named exports
+
+## Evidence
+
+- exportStyle: named
+
+---
+id: desktop-mcp-bridge-instinct-test-location
+trigger: "When adding or updating tests"
+confidence: 0.9
+domain: testing
+source: repo-analysis
+source_repo: Emad211/Desktop-MCP-Bridge
+---
+
+# Desktop Mcp Bridge Instinct Test Location
+
+## Action
+
+Place test files in the separate tests/ directory
+
+## Evidence
+
+- testLocation: separate
+- commonFolders: tests
+
+---
+id: desktop-mcp-bridge-instinct-test-naming
+trigger: "When naming a test file"
+confidence: 0.8
+domain: testing
+source: repo-analysis
+source_repo: Emad211/Desktop-MCP-Bridge
+---
+
+# Desktop Mcp Bridge Instinct Test Naming
+
+## Action
+
+Use *.test.* in the filename
+
+## Evidence
+
+- filesInvolved: **/*.test.*
+- Pattern in feature-development workflow
+
+---
+id: desktop-mcp-bridge-instinct-test-sequence
+trigger: "When developing a new feature"
+confidence: 0.9
+domain: testing
+source: repo-analysis
+source_repo: Emad211/Desktop-MCP-Bridge
+---
+
+# Desktop Mcp Bridge Instinct Test Sequence
+
+## Action
+
+Add feature implementation, then add tests for the feature, then update documentation
+
+## Evidence
+
+- commitSequence in feature-development workflow
+- docs: add test-first v2 delivery plan
+
+---
+id: desktop-mcp-bridge-instinct-git-commit-format
+trigger: "When writing a commit message"
+confidence: 0.95
+domain: git
+source: repo-analysis
+source_repo: Emad211/Desktop-MCP-Bridge
+---
+
+# Desktop Mcp Bridge Instinct Git Commit Format
+
+## Action
+
+Use a conventional commit prefix: docs:, feat:, or test:
+
+## Evidence
+
+- commits.type: conventional
+- commits.prefixes: [docs, feat, test]
+- Seen in commit examples
+
+---
+id: desktop-mcp-bridge-instinct-git-commit-length
+trigger: "When writing a commit message"
+confidence: 0.7
+domain: git
+source: repo-analysis
+source_repo: Emad211/Desktop-MCP-Bridge
+---
+
+# Desktop Mcp Bridge Instinct Git Commit Length
+
+## Action
+
+Keep the commit message concise, around 44 characters on average
+
+## Evidence
+
+- commits.averageLength: 44
+
+---
+id: desktop-mcp-bridge-instinct-add-docs-workflow
+trigger: "When someone wants to document new features, strategies, or operational instructions"
+confidence: 0.95
+domain: workflow
+source: repo-analysis
+source_repo: Emad211/Desktop-MCP-Bridge
+---
+
+# Desktop Mcp Bridge Instinct Add Docs Workflow
+
+## Action
+
+Create or update a markdown file in docs/, gpt/, or docs/ADR/ directories and commit with a 'docs:' prefix
+
+## Evidence
+
+- add-or-update-documentation workflow
+- docs: define v2 scope and acceptance gates
+
+---
+id: desktop-mcp-bridge-instinct-add-superassistant-script-workflow
+trigger: "When someone wants to add or improve automation for SuperAssistant proxy operations or integration tests"
+confidence: 0.9
+domain: workflow
+source: repo-analysis
+source_repo: Emad211/Desktop-MCP-Bridge
+---
+
+# Desktop Mcp Bridge Instinct Add Superassistant Script Workflow
+
+## Action
+
+Create or update a PowerShell script in scripts/ with a name matching *superassistant*.ps1 and commit with a 'feat:' or 'test:' prefix
+
+## Evidence
+
+- add-or-update-superassistant-powershell-scripts workflow
+
