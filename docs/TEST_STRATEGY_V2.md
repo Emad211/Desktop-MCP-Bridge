@@ -2,14 +2,15 @@
 
 ## Objectives
 
-The test strategy must answer four separate questions:
+The test strategy must answer five separate questions:
 
 1. Is the Python runtime correct?
 2. Does the MCP contract work independently of the browser extension?
 3. Does the local SuperAssistant proxy correctly expose the bridge?
-4. Can normal ChatGPT web discover, execute, and consume the tools on the target Windows device?
+4. Does an MCP client complete a real initialize/list/call round trip through the browser-facing SSE endpoint?
+5. Can normal ChatGPT web discover, execute, and consume the tools on the target Windows device?
 
-A green unit suite is necessary but not sufficient. Windows desktop, UI Automation, browser, OCR, UAC, proxy, and extension behavior require real-device acceptance.
+A green unit suite is necessary but not sufficient. Windows desktop, UI Automation, browser, OCR, UAC, proxy, SSE transport, and extension behavior require integration or real-device acceptance.
 
 ## Test layers
 
@@ -42,7 +43,7 @@ Required areas:
 
 Coverage is tracked by subsystem. The project must not use total coverage alone to hide low coverage in consequential Windows tools.
 
-## Layer 3 — MCP contract tests
+## Layer 3 — MCP child contract tests
 
 The child server is launched over stdio exactly as the generated SuperAssistant config launches it.
 
@@ -58,24 +59,48 @@ Required sequence:
 
 Failures must include the child stderr tail and the last valid JSON-RPC message.
 
-## Layer 4 — Proxy integration tests
+## Layer 4 — Proxy lifecycle tests
 
-The official proxy is started on an unused localhost port.
+The pinned proxy runtime is started on an unused localhost port by launching its JavaScript entry point directly with hidden `node.exe`.
 
 Required assertions:
 
 - one owned process;
 - listener PID is owned by the recorded process tree;
+- launcher and listener are `node` processes;
+- launch method is `direct-node-hidden`;
 - proxy log reports connection to `desktop-mcp-bridge`;
 - no `Failed to connect` entry for the bridge;
 - expected endpoint is reported;
 - restart replaces the owned process;
 - foreign listener is not terminated;
-- stop removes only the owned process.
+- stop removes only the owned process and leaves no owned listener.
 
 The release path uses SSE first because it is the most established extension-facing mode. Streamable HTTP remains an experimental secondary path until the extension's open tool-list and response issues are verified closed.
 
-## Layer 5 — Target Windows runtime tests
+## Layer 5 — Browser-facing SSE contract
+
+This layer verifies the exact network path used by MCP SuperAssistant without depending on the ChatGPT DOM.
+
+The test client connects to `http://localhost:<port>/sse` using the MCP SDK, then performs:
+
+1. SSE connection and message endpoint negotiation.
+2. MCP `initialize`.
+3. `tools/list` through the proxy.
+4. Assert `bridge_status`, `read_text_file`, `write_text_file`, and `run_command` are present.
+5. `tools/call` for `bridge_status`.
+6. Assert the call does not return `isError=true`.
+7. Close the client while leaving the managed proxy healthy.
+
+This layer distinguishes three otherwise-confusable failures:
+
+- child MCP failure;
+- proxy aggregation/listener failure;
+- browser-facing SSE protocol failure.
+
+The probe is implemented by `scripts/probe_superassistant_sse.py` and runs both in CI and the one-command target-device preflight.
+
+## Layer 6 — Target Windows runtime tests
 
 Runs on the user's actual interactive Windows session.
 
@@ -106,7 +131,7 @@ All mutation tests use an isolated acceptance directory and disposable processes
 
 No acceptance test changes system services, registry, network configuration, scheduled tasks, or power state unless that test is explicitly selected and confirmed by the operator.
 
-## Layer 6 — Normal ChatGPT web acceptance
+## Layer 7 — Normal ChatGPT web acceptance
 
 Manual because it depends on the extension, ChatGPT DOM, account state, and browser session.
 
@@ -115,6 +140,7 @@ Manual because it depends on the extension, ChatGPT DOM, account state, and brow
 - normal ChatGPT web chat is available;
 - MCP SuperAssistant extension is installed and enabled;
 - only one relevant AI-chat tab is open during initial diagnosis;
+- stdio, proxy lifecycle, and SSE contract probes are green;
 - proxy status is healthy;
 - Auto-Execute and Auto-Submit are disabled;
 - an isolated acceptance directory exists.
@@ -143,6 +169,7 @@ The local acceptance report records:
 - extension version;
 - proxy package and version;
 - proxy transport and endpoint;
+- stdio and SSE probe results;
 - expected and observed tool counts;
 - passed/failed cases;
 - redacted log locations;
@@ -151,11 +178,12 @@ The local acceptance report records:
 ## Failure classification
 
 - **L0 Python/runtime:** import, dependency, syntax, or process startup failure.
-- **L1 MCP child:** initialize, tools list, or tool-call failure.
-- **L2 proxy:** child aggregation, listener, process ownership, or transport failure.
-- **L3 extension:** connection, tool discovery, rendering, Run, or result insertion failure.
-- **L4 model protocol:** malformed tool-call output or failure to follow inserted instructions.
-- **L5 desktop capability:** Windows, browser, OCR, UIA, shell, development, or hardware failure.
+- **L1 MCP child:** initialize, tools list, or direct child tool-call failure.
+- **L2 proxy lifecycle:** child aggregation, listener, process ownership, start, restart, or stop failure.
+- **L3 SSE transport:** browser-facing connection, message negotiation, proxied tools list, or proxied tool-call failure.
+- **L4 extension:** connection, tool discovery, rendering, Run, or result insertion failure.
+- **L5 model protocol:** malformed tool-call output or failure to follow inserted instructions.
+- **L6 desktop capability:** Windows, browser, OCR, UIA, shell, development, or hardware failure.
 
 Every diagnostic command must identify one of these layers instead of returning a generic "connection failed" message.
 
@@ -163,8 +191,9 @@ Every diagnostic command must identify one of these layers instead of returning 
 
 - all CI matrices pass;
 - no PowerShell parser errors;
-- all MCP contract tests pass;
-- all proxy lifecycle tests pass on the target device;
+- all MCP child contract tests pass;
+- all proxy lifecycle tests pass;
+- the browser-facing SSE contract passes in CI and on the target device;
 - all normal ChatGPT web acceptance cases pass;
 - no unresolved critical or high-severity security issue;
 - no known duplicate-execution defect;
