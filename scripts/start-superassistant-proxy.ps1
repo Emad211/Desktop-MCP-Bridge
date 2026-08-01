@@ -9,18 +9,21 @@ param(
     [string]$ProxyPackageVersion = "0.1.8",
     [int]$StartupTimeoutSeconds = 120,
     [switch]$InstallNodeIfMissing,
+    [switch]$RefreshProxyRuntime,
     [switch]$Restart
 )
 
 $ErrorActionPreference = "Stop"
 $StateDir = Join-Path $env:LOCALAPPDATA "DesktopMCPBridge"
-New-Item -ItemType Directory -Path $StateDir -Force | Out-Null
+$RuntimeDir = Join-Path $StateDir "superassistant-runtime"
+New-Item -ItemType Directory -Path $StateDir, $RuntimeDir -Force | Out-Null
 $StatePath = Join-Path $StateDir "superassistant-proxy.json"
 $OutLog = Join-Path $StateDir "superassistant-proxy.stdout.log"
 $ErrLog = Join-Path $StateDir "superassistant-proxy.stderr.log"
 
-function Get-NpxCommand {
-    foreach ($Name in @("npx.cmd", "npx.exe", "npx")) {
+function Get-CommandPath {
+    param([string[]]$Names)
+    foreach ($Name in $Names) {
         $Command = Get-Command $Name -ErrorAction SilentlyContinue
         if ($Command) { return $Command.Source }
     }
@@ -29,7 +32,7 @@ function Get-NpxCommand {
 
 function Install-NodeRuntime {
     if (-not $InstallNodeIfMissing) {
-        throw "npx was not found. Install Node.js LTS or rerun with -InstallNodeIfMissing."
+        throw "node/npm was not found. Install Node.js LTS or rerun with -InstallNodeIfMissing."
     }
     if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
         throw "WinGet is required for automatic Node.js installation."
@@ -38,7 +41,8 @@ function Install-NodeRuntime {
     if ($LASTEXITCODE -ne 0) {
         throw "Node.js LTS installation failed with exit code $LASTEXITCODE."
     }
-    $env:Path = [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [Environment]::GetEnvironmentVariable("Path", "User")
+    $env:Path = [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" +
+        [Environment]::GetEnvironmentVariable("Path", "User")
 }
 
 function Test-ProcessDescendant {
@@ -73,6 +77,68 @@ function Restore-ProcessEnvironment {
     }
 }
 
+function Set-NetworkEnvironment {
+    param([object]$NetworkPlan, [string]$RequestedMode)
+    $env:NO_PROXY = [string]$NetworkPlan.local_bypass
+    $env:no_proxy = [string]$NetworkPlan.local_bypass
+    $env:NPM_CONFIG_FETCH_TIMEOUT = "30000"
+    $env:NPM_CONFIG_FETCH_RETRIES = "1"
+    $env:NPM_CONFIG_PREFER_OFFLINE = "true"
+    $env:NPM_CONFIG_AUDIT = "false"
+    $env:NPM_CONFIG_FUND = "false"
+
+    if ($NetworkPlan.resolved_mode -eq "proxy") {
+        $SelectedProxy = [string]$NetworkPlan.selected_proxy
+        $env:HTTP_PROXY = $SelectedProxy
+        $env:HTTPS_PROXY = $SelectedProxy
+        $env:http_proxy = $SelectedProxy
+        $env:https_proxy = $SelectedProxy
+        $env:NPM_CONFIG_PROXY = $SelectedProxy
+        $env:NPM_CONFIG_HTTPS_PROXY = $SelectedProxy
+    } elseif ($RequestedMode -eq "direct") {
+        foreach ($Name in @(
+            "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY",
+            "http_proxy", "https_proxy", "all_proxy",
+            "NPM_CONFIG_PROXY", "NPM_CONFIG_HTTPS_PROXY"
+        )) {
+            Remove-Item "Env:$Name" -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+function Resolve-ProxyEntry {
+    param([string]$PackageRoot)
+    $ManifestPath = Join-Path $PackageRoot "package.json"
+    if (-not (Test-Path $ManifestPath)) {
+        throw "Proxy package manifest was not found: $ManifestPath"
+    }
+    $Manifest = Get-Content $ManifestPath -Raw | ConvertFrom-Json
+    $BinRelative = $null
+    if ($Manifest.bin -is [string]) {
+        $BinRelative = [string]$Manifest.bin
+    } elseif ($Manifest.bin) {
+        $Preferred = $Manifest.bin.PSObject.Properties |
+            Where-Object { $_.Name -eq "mcp-superassistant-proxy" } |
+            Select-Object -First 1
+        if ($Preferred) {
+            $BinRelative = [string]$Preferred.Value
+        } else {
+            $First = $Manifest.bin.PSObject.Properties | Select-Object -First 1
+            if ($First) { $BinRelative = [string]$First.Value }
+        }
+    }
+    if (-not $BinRelative) {
+        $Fallback = Join-Path $PackageRoot "dist\index.js"
+        if (Test-Path $Fallback) { return (Resolve-Path $Fallback).Path }
+        throw "The proxy package exposes no executable bin entry."
+    }
+    $Entry = Join-Path $PackageRoot $BinRelative
+    if (-not (Test-Path $Entry)) {
+        throw "Proxy executable entry was not found: $Entry"
+    }
+    return (Resolve-Path $Entry).Path
+}
+
 if (-not (Test-Path $ConfigPath)) {
     throw "SuperAssistant config was not found: $ConfigPath. Run scripts/export-superassistant-config.ps1 first."
 }
@@ -100,18 +166,18 @@ if ($ExistingListeners.Count -gt 0) {
     throw "Port $Port is already in use by an unverified process. PIDs: $($Pids -join ', '). Refusing to terminate it."
 }
 
-$Npx = Get-NpxCommand
-if (-not $Npx) {
+$Node = Get-CommandPath -Names @("node.exe", "node")
+$Npm = Get-CommandPath -Names @("npm.cmd", "npm.exe", "npm")
+if (-not $Node -or -not $Npm) {
     Install-NodeRuntime
-    $Npx = Get-NpxCommand
+    $Node = Get-CommandPath -Names @("node.exe", "node")
+    $Npm = Get-CommandPath -Names @("npm.cmd", "npm.exe", "npm")
 }
-if (-not $Npx) {
-    throw "Node.js was installed but npx is still unavailable. Open a new PowerShell and retry."
+if (-not $Node -or -not $Npm) {
+    throw "Node.js was installed but node/npm is still unavailable. Open a new PowerShell and retry."
 }
 
-$NetworkArguments = @{
-    NetworkMode = $NetworkMode
-}
+$NetworkArguments = @{ NetworkMode = $NetworkMode }
 if ($ProxyUrl) { $NetworkArguments.ProxyUrl = $ProxyUrl }
 $NetworkPlanRaw = & (Join-Path $PSScriptRoot "get-superassistant-network-plan.ps1") @NetworkArguments
 $NetworkPlan = $NetworkPlanRaw | ConvertFrom-Json
@@ -126,16 +192,15 @@ $Endpoint = switch ($OutputTransport) {
     "ws" { "ws://localhost:$Port/message" }
 }
 
-Remove-Item $OutLog, $ErrLog -Force -ErrorAction SilentlyContinue
 $Package = "@srbhptl39/mcp-superassistant-proxy@$ProxyPackageVersion"
-$Arguments = @(
-    "-y",
-    $Package,
-    "--config", ('"{0}"' -f $ConfigPath),
-    "--port", "$Port",
-    "--outputTransport", $OutputTransport,
-    "--logLevel", "info"
-)
+$PackageRoot = Join-Path $RuntimeDir "node_modules\@srbhptl39\mcp-superassistant-proxy"
+$ManifestPath = Join-Path $PackageRoot "package.json"
+$InstalledVersion = $null
+if (Test-Path $ManifestPath) {
+    try { $InstalledVersion = (Get-Content $ManifestPath -Raw | ConvertFrom-Json).version } catch {}
+}
+$NeedsInstall = $RefreshProxyRuntime -or -not $InstalledVersion -or
+    ([string]$InstalledVersion -ne [string]$ProxyPackageVersion)
 
 $EnvironmentNames = @(
     "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY",
@@ -147,36 +212,43 @@ $EnvironmentNames = @(
 )
 $SavedEnvironment = Save-ProcessEnvironment -Names $EnvironmentNames
 try {
-    $env:NO_PROXY = [string]$NetworkPlan.local_bypass
-    $env:no_proxy = [string]$NetworkPlan.local_bypass
-    $env:NPM_CONFIG_FETCH_TIMEOUT = "30000"
-    $env:NPM_CONFIG_FETCH_RETRIES = "1"
-    $env:NPM_CONFIG_PREFER_OFFLINE = "true"
-    $env:NPM_CONFIG_AUDIT = "false"
-    $env:NPM_CONFIG_FUND = "false"
+    Set-NetworkEnvironment -NetworkPlan $NetworkPlan -RequestedMode $NetworkMode
 
-    if ($NetworkPlan.resolved_mode -eq "proxy") {
-        $SelectedProxy = [string]$NetworkPlan.selected_proxy
-        $env:HTTP_PROXY = $SelectedProxy
-        $env:HTTPS_PROXY = $SelectedProxy
-        $env:http_proxy = $SelectedProxy
-        $env:https_proxy = $SelectedProxy
-        $env:NPM_CONFIG_PROXY = $SelectedProxy
-        $env:NPM_CONFIG_HTTPS_PROXY = $SelectedProxy
-    } elseif ($NetworkMode -eq "direct") {
-        foreach ($Name in @(
-            "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY",
-            "http_proxy", "https_proxy", "all_proxy",
-            "NPM_CONFIG_PROXY", "NPM_CONFIG_HTTPS_PROXY"
-        )) {
-            Remove-Item "Env:$Name" -ErrorAction SilentlyContinue
+    if ($NeedsInstall) {
+        Write-Host "Installing pinned SuperAssistant proxy runtime $ProxyPackageVersion (one-time/cacheable)..." -ForegroundColor Cyan
+        $PackageJsonPath = Join-Path $RuntimeDir "package.json"
+        if (-not (Test-Path $PackageJsonPath)) {
+            '{"private":true}' | Set-Content -Path $PackageJsonPath -Encoding UTF8
         }
+        & $Npm install `
+            --prefix $RuntimeDir `
+            --save-exact `
+            --omit=dev `
+            --no-package-lock `
+            --no-audit `
+            --no-fund `
+            $Package
+        if ($LASTEXITCODE -ne 0) {
+            throw "Installing the pinned proxy runtime failed with exit code $LASTEXITCODE."
+        }
+    } else {
+        Write-Host "Reusing cached SuperAssistant proxy runtime $InstalledVersion." -ForegroundColor DarkCyan
     }
 
-    $Launcher = Start-Process -FilePath $Npx `
+    $ProxyEntry = Resolve-ProxyEntry -PackageRoot $PackageRoot
+    Remove-Item $OutLog, $ErrLog -Force -ErrorAction SilentlyContinue
+    $Arguments = @(
+        ('"{0}"' -f $ProxyEntry),
+        "--config", ('"{0}"' -f $ConfigPath),
+        "--port", "$Port",
+        "--outputTransport", $OutputTransport,
+        "--logLevel", "info"
+    )
+
+    $Launcher = Start-Process -FilePath $Node `
         -ArgumentList ($Arguments -join " ") `
-        -WorkingDirectory (Split-Path -Parent $ConfigPath) `
-        -WindowStyle Minimized `
+        -WorkingDirectory $RuntimeDir `
+        -WindowStyle Hidden `
         -RedirectStandardOutput $OutLog `
         -RedirectStandardError $ErrLog `
         -PassThru
@@ -204,9 +276,11 @@ do {
     if ($Text -match "(?im)Failed to connect to servers:\s*.*desktop-mcp-bridge") {
         throw "The proxy started but failed to initialize desktop-mcp-bridge. Inspect $OutLog and $ErrLog."
     }
-    $Connected = $Text -match "(?im)Connected servers:\s*.*desktop-mcp-bridge" -or (
-        $Text -match "(?im)Connected to\s+1\s+of\s+1\s+servers"
-    )
+    $Connected = $Text -match "(?im)Connected servers:\s*.*desktop-mcp-bridge" -or
+        $Text -match "(?im)Connected to server:\s*desktop-mcp-bridge" -or
+        $Text -match "(?im)Successfully initialized server:\s*desktop-mcp-bridge" -or (
+            $Text -match "(?im)Connected to\s+1\s+of\s+1\s+servers"
+        )
     if ($Listeners.Count -eq 1 -and $Connected) {
         $CandidatePid = [int]$Listeners[0].OwningProcess
         if (-not (Test-ProcessDescendant -ProcessId $CandidatePid -AncestorProcessId $Launcher.Id)) {
@@ -229,6 +303,10 @@ $State = [ordered]@{
     provider = "mcp-superassistant-proxy"
     package = $Package
     package_version = $ProxyPackageVersion
+    launch_method = "direct-node-hidden"
+    runtime_dir = $RuntimeDir
+    proxy_entry = $ProxyEntry
+    node_path = $Node
     launcher_pid = $Launcher.Id
     launcher_started_at = $LauncherStartedAt
     listener_pid = $ListenerPid
